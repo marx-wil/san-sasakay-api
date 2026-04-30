@@ -3,17 +3,7 @@ name: ci
 on:
   push:
     branches: [main]
-    paths:
-      - "sakay-api/**"
-      - ".github/workflows/ci.yml"
   pull_request:
-    paths:
-      - "sakay-api/**"
-      - ".github/workflows/ci.yml"
-
-defaults:
-  run:
-    working-directory: sakay-api
 
 jobs:
   lint-and-typecheck:
@@ -25,7 +15,6 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: sakay-api/package-lock.json
 
       - run: npm ci
       - run: npm run lint
@@ -39,7 +28,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
-          context: sakay-api
+          context: .
           push: false
           tags: sakay-api:ci
           cache-from: type=gha

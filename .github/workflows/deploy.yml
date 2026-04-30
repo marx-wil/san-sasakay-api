@@ -3,14 +3,7 @@ name: deploy
 on:
   push:
     branches: [main]
-    paths:
-      - "sakay-api/**"
-      - ".github/workflows/deploy.yml"
   workflow_dispatch:
-
-defaults:
-  run:
-    working-directory: sakay-api
 
 permissions:
   contents: read
@@ -44,7 +37,7 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: sakay-api
+          context: .
           push: true
           platforms: linux/arm64
           tags: |
