@@ -1,9 +1,10 @@
 #!/bin/bash
 # cloud-init user-data for Sakay API EC2.
 # Bootstraps a single t4g.micro into a self-healing API host:
-#   - Installs Docker + Compose + Caddy + AWS CLI + CloudWatch agent
-#   - Pulls the API image from GHCR
-#   - Runs Postgres + Caddy + API + Worker via systemd-managed compose
+#   - Installs Docker + Compose + AWS CLI + CloudWatch agent
+#   - Runs Caddy + Postgres + API + Worker via systemd-managed compose
+#   - Pulls the API image from GHCR (best-effort: missing image does NOT
+#     kill the bootstrap, so curl http://<eip>/ still answers with 502)
 #   - Daily backup cron to S3
 #
 # Variables interpolated by Terraform's templatefile():
@@ -32,14 +33,12 @@ curl -fsSL "https://github.com/docker/compose/releases/download/v2.29.7/docker-c
   -o /usr/libexec/docker/cli-plugins/docker-compose
 chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
-# ─── 2. Caddy ───────────────────────────────────────────────────────────────
-dnf copr enable -y @caddy/caddy
-dnf install -y caddy
-systemctl enable caddy
-
-# ─── 3. application directory ───────────────────────────────────────────────
+# ─── 2. application directory ───────────────────────────────────────────────
 install -d -m 0755 /opt/sakay
 install -d -m 0755 /opt/sakay/postgres-data
+install -d -m 0755 /opt/sakay/caddy-data
+install -d -m 0755 /opt/sakay/caddy-config
+install -d -m 0755 /var/log/caddy
 
 cat > /opt/sakay/.env <<EOF
 NODE_ENV=production
@@ -66,6 +65,40 @@ chmod 0640 /opt/sakay/.env
 # Extract the Postgres password we just generated for the postgres container.
 PG_PASS=$(grep -oP '(?<=postgres://sakay:)[^@]+' /opt/sakay/.env)
 
+# ─── 3. Caddyfile (rendered to /opt/sakay so the caddy container mounts it) ─
+if [ -n "${domain_name}" ]; then
+  cat > /opt/sakay/Caddyfile <<EOF
+{
+  email ${letsencrypt_email}
+}
+
+${api_subdomain}.${domain_name} {
+  encode gzip
+  reverse_proxy api:3000
+  log {
+    output file /var/log/caddy/access.log
+    format console
+  }
+}
+EOF
+else
+  # No domain configured. Serve plain HTTP on port 80 for testing.
+  cat > /opt/sakay/Caddyfile <<EOF
+:80 {
+  encode gzip
+  reverse_proxy api:3000
+  log {
+    output file /var/log/caddy/access.log
+    format console
+  }
+}
+EOF
+fi
+
+# ─── 4. docker-compose.yml ──────────────────────────────────────────────────
+# `app` profile is the API + worker. They are started best-effort so that if
+# the GHCR image isn't published yet (first deploy), Caddy + Postgres still
+# come up and the public IP responds.
 cat > /opt/sakay/docker-compose.yml <<EOF
 name: sakay
 services:
@@ -74,7 +107,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: sakay
-      POSTGRES_PASSWORD: ${PG_PASS}
+      POSTGRES_PASSWORD: $${PG_PASS}
       POSTGRES_DB: sakay
       TIMESCALEDB_TELEMETRY: "off"
     volumes:
@@ -86,19 +119,33 @@ services:
       retries: 10
     networks: [sakaynet]
 
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - /opt/sakay/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/sakay/caddy-data:/data
+      - /opt/sakay/caddy-config:/config
+      - /var/log/caddy:/var/log/caddy
+    networks: [sakaynet]
+
   api:
     image: ${ghcr_image}
+    profiles: [app]
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     env_file: /opt/sakay/.env
-    ports:
-      - "127.0.0.1:3000:3000"
     networks: [sakaynet]
 
   worker:
     image: ${ghcr_image}
+    profiles: [app]
     restart: unless-stopped
     depends_on:
       postgres:
@@ -112,33 +159,13 @@ networks:
     driver: bridge
 EOF
 
-# ─── 4. Caddyfile ───────────────────────────────────────────────────────────
-if [ -n "${domain_name}" ]; then
-  cat > /etc/caddy/Caddyfile <<EOF
-{
-  email ${letsencrypt_email}
-}
-
-${api_subdomain}.${domain_name} {
-  encode gzip
-  reverse_proxy 127.0.0.1:3000
-  log {
-    output file /var/log/caddy/access.log
-    format console
-  }
-}
-EOF
-else
-  # No domain configured. Serve plain HTTP on port 80 for testing.
-  cat > /etc/caddy/Caddyfile <<EOF
-:80 {
-  reverse_proxy 127.0.0.1:3000
-}
-EOF
-fi
-systemctl restart caddy
-
 # ─── 5. systemd unit for compose ────────────────────────────────────────────
+# Two-phase boot:
+#   1. Always bring up postgres + caddy (their images are public, this never
+#      fails on a healthy network).
+#   2. Best-effort pull + up of the `app` profile. If the GHCR image is the
+#      placeholder or hasn't been pushed yet, this just leaves Caddy answering
+#      502s until the next `deploy.yml` run replaces the image.
 cat > /etc/systemd/system/sakay.service <<'EOF'
 [Unit]
 Description=Sakay API stack (docker compose)
@@ -150,9 +177,10 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/sakay
-ExecStartPre=/usr/bin/docker compose pull
-ExecStart=/usr/bin/docker compose up -d --remove-orphans
-ExecStop=/usr/bin/docker compose down
+ExecStart=/usr/bin/docker compose up -d --remove-orphans postgres caddy
+ExecStartPost=-/bin/bash -c '/usr/bin/docker compose --profile app pull --ignore-pull-failures || true'
+ExecStartPost=-/bin/bash -c '/usr/bin/docker compose --profile app up -d --remove-orphans || true'
+ExecStop=/usr/bin/docker compose --profile app down
 
 [Install]
 WantedBy=multi-user.target
@@ -166,12 +194,12 @@ cat > /etc/cron.daily/sakay-backup <<EOF
 #!/bin/bash
 set -e
 docker exec sakay-postgres-1 sh -c \
-  "pg_dump --no-owner --no-privileges \"\$\${DATABASE_URL:-postgres://sakay:${PG_PASS}@localhost:5432/sakay}\" | gzip -9" \
+  "pg_dump --no-owner --no-privileges \"\$${DATABASE_URL:-postgres://sakay:$${PG_PASS}@localhost:5432/sakay}\" | gzip -9" \
   > /tmp/sakay-dump.sql.gz
 aws s3 cp --region ${aws_region} \
   --storage-class STANDARD_IA \
   /tmp/sakay-dump.sql.gz \
-  s3://${s3_backup_bucket}/sakay-api/\$(date -u +%Y%m%dT%H%M%SZ)/dump.sql.gz
+  s3://${s3_backup_bucket}/sakay-api/\$$(date -u +%Y%m%dT%H%M%SZ)/dump.sql.gz
 rm -f /tmp/sakay-dump.sql.gz
 EOF
 chmod +x /etc/cron.daily/sakay-backup

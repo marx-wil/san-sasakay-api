@@ -1,0 +1,7 @@
+{
+  "commands": [
+    "docker ps --format \"table {{.Names}}\\t{{.Status}}\"",
+    "echo ---",
+    "docker logs sakay-caddy-1 --tail 5 2>&1"
+  ]
+}

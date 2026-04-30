@@ -8,7 +8,7 @@
 
 api.REPLACE_WITH_DOMAIN {
   encode gzip
-  reverse_proxy 127.0.0.1:3000
+  reverse_proxy api:3000
   log {
     output file /var/log/caddy/access.log
     format console

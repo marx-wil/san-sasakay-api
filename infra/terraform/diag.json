@@ -1,0 +1,25 @@
+{
+  "commands": [
+    "echo === CLOUD-INIT STATUS ===",
+    "cloud-init status --long || true",
+    "echo === BOOTSTRAP ERRORS ===",
+    "grep -nEi 'error|fail|no match|not found|cannot|nothing to do' /var/log/sakay-bootstrap.log | head -n 50 || echo NO_BOOTSTRAP_LOG",
+    "echo === LAST 80 LINES OF BOOTSTRAP LOG ===",
+    "tail -n 80 /var/log/sakay-bootstrap.log 2>&1 || echo NO_BOOTSTRAP_LOG",
+    "echo === DOCKER + COMPOSE ===",
+    "systemctl is-active docker || true",
+    "docker version 2>&1 | head -n 10 || echo DOCKER_MISSING",
+    "docker compose version 2>&1 || echo COMPOSE_MISSING",
+    "echo === SAKAY SERVICE ===",
+    "systemctl is-active sakay.service || true",
+    "systemctl status sakay.service --no-pager -l | head -n 40 || true",
+    "echo === COMPOSE PS ===",
+    "cd /opt/sakay && docker compose ps 2>&1 || echo NO_COMPOSE_DIR",
+    "echo === LISTENERS ===",
+    "ss -tlnp 2>&1 | head -n 20 || true",
+    "echo === CADDY LOGS ===",
+    "docker logs sakay-caddy-1 --tail 30 2>&1 || echo NO_CADDY_CONTAINER",
+    "echo === POSTGRES LOGS ===",
+    "docker logs sakay-postgres-1 --tail 20 2>&1 || echo NO_POSTGRES_CONTAINER"
+  ]
+}
