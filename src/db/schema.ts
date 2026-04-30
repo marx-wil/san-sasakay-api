@@ -69,10 +69,18 @@ export type PointsEventKind = (typeof POINTS_EVENT_KIND)[number];
 
 // ─── users ──────────────────────────────────────────────────────────────────
 // Auth credentials live in identity_proofs; users carries product state only.
+//
+// Naming model: structured `firstName` + `lastName` are the typed-by-the-user
+// fields collected at onboarding. `displayName` remains in the schema for
+// legacy rows + as a free-form override slot, but the /me API computes the
+// `displayName` it returns from first/last when those are populated. See
+// migrations/0002_user_names.sql.
 export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    firstName: text("first_name"),
+    lastName: text("last_name"),
     displayName: text("display_name"),
     credibilityScore: real("credibility_score").notNull().default(1.0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

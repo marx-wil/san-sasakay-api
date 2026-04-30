@@ -12,6 +12,39 @@ export function hashIdentifier(raw: string): string {
   return createHash("sha256").update(`${env.JWT_SECRET}::${normalized}`).digest("hex");
 }
 
+/**
+ * Normalize a Philippine mobile number to E.164 (`+639XXXXXXXXX`).
+ *
+ * Accepts the formats commuters actually type:
+ *   - `09171234567`             (local zero-prefix, 11 digits)
+ *   - `9171234567`              (no prefix, 10 digits, starts with 9)
+ *   - `+639171234567`           (already E.164)
+ *   - `639171234567`            (international, missing +)
+ *   - `0917 123 4567` / dashes  (any whitespace/punctuation)
+ *
+ * Throws if it doesn't look like a PH mobile number. We deliberately do
+ * NOT accept landlines — every commuter-facing feature assumes mobile.
+ */
+export function normalizePhPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+
+  let national: string;
+  if (digits.startsWith("63") && digits.length === 12) {
+    national = digits.slice(2);
+  } else if (digits.startsWith("0") && digits.length === 11) {
+    national = digits.slice(1);
+  } else if (digits.length === 10) {
+    national = digits;
+  } else {
+    throw new Error("INVALID_PH_PHONE");
+  }
+
+  // PH mobile numbers always start with 9.
+  if (!national.startsWith("9")) throw new Error("INVALID_PH_PHONE");
+
+  return `+63${national}`;
+}
+
 /** Plain SHA-256 (no pepper) for short-lived tokens — fast lookup at /verify. */
 export function hashToken(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");

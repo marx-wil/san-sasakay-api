@@ -253,20 +253,39 @@ npm run typecheck         # tsc --noEmit
 ### Trying the auth flow locally
 
 ```bash
-# 1. Request a magic link.
+# 1. Request a magic link. Always returns 202.
 curl -X POST http://localhost:3000/auth/request \
   -H 'content-type: application/json' \
   -d '{"email":"you@example.com"}'
 
-# 2. Open Mailpit at http://localhost:8025, click the latest email, copy the
-#    link, paste into your terminal:
-curl 'http://localhost:3000/auth/verify?token=PASTE_TOKEN_HERE'
-# {"token":"<jwt>","user":{"id":"...","displayName":null}}
+# 2. Open Mailpit at http://localhost:8025, click the latest email, copy
+#    the URL out of the link, and pull the token query param off the end.
+#    Pass &format=json so curl gets a JSON body instead of a 302 redirect:
+curl 'http://localhost:3000/auth/verify?token=PASTE_TOKEN_HERE&format=json'
+# {"token":"<jwt>","user":{"id":"...","displayName":null,"hasPhone":false}}
 
 # 3. Use the JWT for authenticated routes:
-curl http://localhost:3000/reports/me \
-  -H 'Authorization: Bearer <jwt>'
+JWT='paste-jwt-here'
+curl http://localhost:3000/me -H "Authorization: Bearer $JWT"
+
+# 4. Set first / last name. Either field is optional; pass null (or an
+#    empty string) to clear it, omit it to leave it untouched. The
+#    response's `displayName` is server-composed from first + last.
+curl -X PATCH http://localhost:3000/me \
+  -H "Authorization: Bearer $JWT" \
+  -H 'content-type: application/json' \
+  -d '{"firstName":"Juan","lastName":"dela Cruz"}'
+
+# 5. Attach a phone number (any of these formats are accepted):
+curl -X POST http://localhost:3000/me/phone \
+  -H "Authorization: Bearer $JWT" \
+  -H 'content-type: application/json' \
+  -d '{"phone":"09171234567"}'
 ```
+
+If you instead open the magic-link URL in a real browser, the API will
+302-redirect you to `${PUBLIC_WEB_URL}/auth/callback#token=<jwt>`. The
+landing app picks the token out of the URL fragment.
 
 ### Resetting the local DB
 
@@ -349,12 +368,55 @@ OpenAPI-style validation. Summary:
 | GET | `/health` | none | Liveness |
 | GET | `/ready` | none | Readiness (pings DB) |
 | POST | `/auth/request` | none | Send magic-link to email |
-| GET | `/auth/verify?token=...` | none | Consume token, return JWT |
+| GET | `/auth/verify?token=...` | none | Consume token, redirect to web with JWT in URL fragment |
+| GET | `/auth/verify?token=...&format=json` | none | Same, but return `{token, user}` as JSON (programmatic) |
+| GET | `/me` | JWT | Current user profile + points balance + which proofs are attached |
+| PATCH | `/me` | JWT | Update first / last name |
+| POST | `/me/phone` | JWT | Attach a PH mobile number (no SMS verification at MVP) |
+| DELETE | `/me/phone` | JWT | Detach the phone proof |
 | POST | `/reports` | JWT | Submit a route status report |
 | GET | `/reports/me` | JWT | Recent reports for current user |
 | GET | `/routes?bbox=...&type=...` | none | Routes intersecting a bbox |
 | GET | `/routes/:id` | none | Full route detail + stops |
 | WS | `/ws` | none (token in next phase) | Subscribe to live route status |
+
+### Public vs authenticated routes (the guest-mode contract)
+
+The clients support a "guest mode" where unauthenticated commuters can
+still see routes and live status. Anything that is per-user — saved
+routes, points/rewards, profile — sits behind `JWT`. The split:
+
+- **Public** (no JWT, work in guest mode): `/health`, `/ready`,
+  `/routes`, `/routes/:id`, `/auth/*`, `/ws`.
+- **Authenticated** (JWT required, surfaced as locked features in the
+  client): `/me`, `/me/phone`, `/reports`, `/reports/me`.
+
+The server returns a stable `401 UNAUTHORIZED` on any authenticated
+endpoint hit without a JWT — the client uses that as the signal to
+render the "Mag-sign in to unlock" overlay rather than mid-screen
+errors.
+
+### `/me` payload
+
+```jsonc
+{
+  "id": "9b3a...",
+  "firstName": null,
+  "lastName": null,
+  // Server-composed: `${firstName} ${lastName}` if either is set, else any
+  // legacy display_name from a pre-migration row, else null. Clients
+  // should read this directly rather than re-deriving it.
+  "displayName": null,
+  "hasEmail": true,
+  "hasPhone": false,
+  "credibilityScore": 1.0,
+  "pointsBalance": 0,
+  "createdAt": "2026-04-30T01:23:45.000Z"
+}
+```
+
+The client uses `hasPhone` to decide whether to prompt the user to add
+a phone number after sign-in (see [Authentication flow](#authentication-flow)).
 
 ### Reporting (POST /reports)
 
@@ -402,6 +464,10 @@ device, retry as many times as needed. The DB has a unique constraint on
 
 ## Authentication flow
 
+Magic-link by email is the **only** sign-in method at MVP. Phone
+numbers are collected *after* authentication via `POST /me/phone` so we
+can wire SMS-OTP verification later without changing the boundary.
+
 ```
 ┌────────┐   POST /auth/request {email}    ┌─────────┐
 │ Client │────────────────────────────────►│  API    │
@@ -412,7 +478,7 @@ device, retry as many times as needed. The DB has a unique constraint on
                                                 │ 4. send email (Mailpit dev / SES prod)
                                                 ▼
 ┌────────┐   click link in email            ┌────────┐
-│ Email  │─────────────────────────────────►│ Client │
+│ Email  │─────────────────────────────────►│Browser │
 └────────┘                                  └────┬───┘
                                                  │ GET /auth/verify?token=...
                                                  ▼
@@ -422,24 +488,54 @@ device, retry as many times as needed. The DB has a unique constraint on
                                                  │ 1. hash incoming token, lookup
                                                  │ 2. verify not expired/used
                                                  │ 3. find-or-create user via identity_proofs
-                                                 │ 4. mark token used
+                                                 │ 4. mark token used + bump last_seen_at
                                                  │ 5. issue JWT (30-day TTL)
                                                  ▼
-                                            { token, user }
+                                  302 → PUBLIC_WEB_URL/auth/callback#token=<JWT>
+                                                 │
+                                                 ▼
+                            ┌────────────────────────────────────────┐
+                            │  Web/app callback page reads fragment, │
+                            │  stores JWT, fetches GET /me, then     │
+                            │  prompts for phone if hasPhone=false.  │
+                            └────────────────────────────────────────┘
 ```
+
+Programmatic clients (the mobile app's foreground universal-link
+handler, curl, integration tests) can opt out of the redirect by
+appending `?format=json`, in which case `/auth/verify` returns
+`{ token, user: { id, displayName, hasPhone } }` directly. The
+default redirect flow is what the email client triggers when a
+commuter taps the link from their inbox.
+
+After sign-in, the client typically:
+
+1. Calls `GET /me` to confirm the JWT is live and read the profile.
+2. If `hasPhone === false`, shows a one-tap "Add your number" step
+   that POSTs to `/me/phone`.
+3. Hides "Mag-sign in to unlock" overlays on rewards / saved-routes
+   surfaces.
 
 Security details:
 
 - The client sees the raw token only inside the magic-link URL. Server stores
   `SHA-256(token)` only.
 - The email is never stored in plaintext. We store
-  `SHA-256(JWT_SECRET || email_lowercased)` as `email_hash`. This means
-  rotating `JWT_SECRET` is destructive — plan the rotation.
+  `SHA-256(JWT_SECRET || email_lowercased)` as `email_hash`. Phone numbers
+  are normalized to E.164 (`+639XXXXXXXXX`) and hashed the same way. This
+  means rotating `JWT_SECRET` is destructive — plan the rotation.
 - POST `/auth/request` is rate-limited to 5/15min per IP and **always**
   returns `202` regardless of whether the email exists, to prevent account
   enumeration.
 - The verify endpoint is single-use: `used_at` is stamped atomically with the
   token consumption.
+- The redirect places the JWT in the URL **fragment** (`#token=...`), not
+  the query string, so it is never sent to the server in subsequent
+  navigations and never lands in access logs or referrer headers.
+- POST `/me/phone` is rate-limited to 10/hour per user and rejects numbers
+  already attached to a different account (`409 PHONE_TAKEN`). The phone
+  proof is stored with `verified_at = NULL` at MVP — Phase 2 will add an
+  SMS-OTP step that flips it.
 
 ---
 

@@ -13,11 +13,26 @@ const RequestBody = z.object({
 
 const VerifyQuery = z.object({
   token: z.string().min(20).max(64),
+  // Default flow is a 302 redirect to PUBLIC_WEB_URL/auth/callback so the
+  // email link "just works" when tapped on a phone. Programmatic callers
+  // (mobile app, curl, tests) opt into JSON with ?format=json.
+  format: z.enum(["json", "redirect"]).optional(),
+});
+
+const VerifyResponse = z.object({
+  token: z.string(),
+  user: z.object({
+    id: z.string().uuid(),
+    displayName: z.string().nullable(),
+    hasPhone: z.boolean(),
+  }),
 });
 
 export const authRoutes: FastifyPluginAsyncZod = async (app) => {
   // POST /auth/request — accepts an email, sends a magic-link.
-  // Always returns 202 to prevent account enumeration.
+  // Always returns 202 to prevent account enumeration: the response shape
+  // is identical whether the email exists, is malformed-but-zod-valid, or
+  // the upstream mail provider failed.
   app.post(
     "/request",
     {
@@ -61,6 +76,15 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
   );
 
   // GET /auth/verify?token=... — consumes the token, signs in (or signs up).
+  //
+  // Two response styles:
+  //   - default (browser-tap from email): 302 redirect to
+  //     PUBLIC_WEB_URL/auth/callback#token=<JWT>. The fragment is never sent
+  //     to the server, so the JWT doesn't leak via referer or proxy logs.
+  //     The web/app callback page is responsible for stashing it.
+  //   - ?format=json: returns { token, user } as JSON. Used by the mobile
+  //     app when it can intercept the link itself (universal links) and by
+  //     curl in the README.
   app.get(
     "/verify",
     {
@@ -68,18 +92,14 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         tags: ["auth"],
         querystring: VerifyQuery,
         response: {
-          200: z.object({
-            token: z.string(),
-            user: z.object({
-              id: z.string().uuid(),
-              displayName: z.string().nullable(),
-            }),
-          }),
+          // Only the JSON path declares a schema; the 302 redirect emits a
+          // minimal body that Fastify writes itself, no validation needed.
+          200: VerifyResponse,
         },
       },
     },
-    async (req) => {
-      const { token } = req.query;
+    async (req, reply) => {
+      const { token, format } = req.query;
       const tokenHash = hashToken(token);
       const now = new Date();
 
@@ -96,58 +116,117 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         .limit(1);
 
       if (!row) {
+        // For browser flow, redirect to the callback with an error so the
+        // landing page can render a friendly message instead of a JSON 401.
+        if (format !== "json") {
+          const url = new URL("/auth/callback", env.PUBLIC_WEB_URL);
+          url.hash = "error=invalid_token";
+          reply.redirect(url.toString(), 302);
+          return;
+        }
         throw Unauthorized("INVALID_TOKEN", "Magic link is invalid or expired");
       }
 
-      // Find or create user (signup-on-verify).
-      const [existing] = await db
-        .select({ userId: identityProofs.userId })
-        .from(identityProofs)
-        .where(
-          and(
-            eq(identityProofs.provider, "email"),
-            eq(identityProofs.identifierHash, row.emailHash),
-          ),
-        )
-        .limit(1);
+      const { userId, displayName, hasPhone } = await findOrCreateUserByEmailHash(row.emailHash);
 
-      let userId: string;
-      let displayName: string | null = null;
-
-      if (existing) {
-        userId = existing.userId;
-        const [u] = await db
-          .select({ id: users.id, displayName: users.displayName })
-          .from(users)
-          .where(eq(users.id, userId))
-          .limit(1);
-        displayName = u?.displayName ?? null;
-      } else {
-        const [created] = await db.insert(users).values({}).returning({
-          id: users.id,
-          displayName: users.displayName,
-        });
-        if (!created) throw BadRequest("USER_CREATE_FAILED", "Could not create user");
-        userId = created.id;
-        displayName = created.displayName ?? null;
-
-        await db.insert(identityProofs).values({
-          userId,
-          provider: "email",
-          identifierHash: row.emailHash,
-          verifiedAt: now,
-          isPrimary: 1,
-        });
-      }
-
-      // Mark token used (single-use).
+      // Mark token used (single-use). Done after user resolution so a DB
+      // failure during user creation doesn't burn the token.
       await db
         .update(magicLinkTokens)
         .set({ usedAt: now, userId })
         .where(eq(magicLinkTokens.tokenHash, tokenHash));
 
+      // Touch last_seen_at — cheap and useful for active-user counts.
+      await db.update(users).set({ lastSeenAt: now }).where(eq(users.id, userId));
+
       const accessToken = app.jwt.sign({ sub: userId });
-      return { token: accessToken, user: { id: userId, displayName } };
+
+      if (format === "json") {
+        return { token: accessToken, user: { id: userId, displayName, hasPhone } };
+      }
+
+      const url = new URL("/auth/callback", env.PUBLIC_WEB_URL);
+      // URL fragment is not sent to the server on subsequent requests, so
+      // the JWT doesn't appear in access logs or referrer headers.
+      url.hash = `token=${encodeURIComponent(accessToken)}`;
+      reply.redirect(url.toString(), 302);
+      return;
     },
   );
 };
+
+/**
+ * Signup-on-verify: if no user has this email proof yet, create one.
+ * Returned `hasPhone` lets the client decide whether to prompt for phone
+ * post-auth without making a second round-trip.
+ */
+async function findOrCreateUserByEmailHash(emailHash: string): Promise<{
+  userId: string;
+  displayName: string | null;
+  hasPhone: boolean;
+}> {
+  const now = new Date();
+
+  const [existing] = await db
+    .select({ userId: identityProofs.userId })
+    .from(identityProofs)
+    .where(and(eq(identityProofs.provider, "email"), eq(identityProofs.identifierHash, emailHash)))
+    .limit(1);
+
+  if (existing) {
+    const [u] = await db
+      .select({
+        id: users.id,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        displayName: users.displayName,
+      })
+      .from(users)
+      .where(eq(users.id, existing.userId))
+      .limit(1);
+
+    const [phoneProof] = await db
+      .select({ userId: identityProofs.userId })
+      .from(identityProofs)
+      .where(and(eq(identityProofs.userId, existing.userId), eq(identityProofs.provider, "phone")))
+      .limit(1);
+
+    return {
+      userId: existing.userId,
+      displayName: composeDisplayName(u?.firstName, u?.lastName, u?.displayName),
+      hasPhone: !!phoneProof,
+    };
+  }
+
+  const [created] = await db.insert(users).values({}).returning({
+    id: users.id,
+  });
+  if (!created) throw BadRequest("USER_CREATE_FAILED", "Could not create user");
+
+  await db.insert(identityProofs).values({
+    userId: created.id,
+    provider: "email",
+    identifierHash: emailHash,
+    verifiedAt: now,
+    isPrimary: 1,
+  });
+
+  // A freshly-created user has no name yet; the client will route to the
+  // post-auth setup screen which collects firstName + lastName via PATCH /me.
+  return { userId: created.id, displayName: null, hasPhone: false };
+}
+
+/**
+ * Same composition rule as the /me payload — keep the two in lockstep.
+ * Prefer structured first/last; fall back to any legacy display_name we
+ * haven't re-prompted (post-migration, pre-edit rows).
+ */
+function composeDisplayName(
+  firstName: string | null | undefined,
+  lastName: string | null | undefined,
+  legacyDisplayName: string | null | undefined,
+): string | null {
+  const composed = [firstName, lastName].filter((s) => s && s.length > 0).join(" ");
+  if (composed.length > 0) return composed;
+  return legacyDisplayName ?? null;
+}
