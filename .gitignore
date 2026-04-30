@@ -1,0 +1,22 @@
+node_modules/
+dist/
+*.log
+
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+Thumbs.db
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/terraform.tfstate
+infra/terraform/terraform.tfstate.backup
+infra/terraform/terraform.tfvars
+infra/terraform/*.auto.tfvars
+
+# Local data
+.postgres-data/
+.mailpit-data/

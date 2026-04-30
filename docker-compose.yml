@@ -1,0 +1,104 @@
+# Local development stack.
+# Run:  docker compose up
+# The api and worker hot-reload via tsx watch when you mount the src/ volume.
+
+name: sakay-api
+
+# ─── Shared env for api + worker ────────────────────────────────────────────
+# Both processes import config.ts which validates the full env shape, even
+# though the worker doesn't use most of these. Defining once via YAML anchor.
+x-app-env: &app-env
+  NODE_ENV: development
+  # info = quiet steady state, visible boot/error events.
+  # Bump to "debug" to see your own debug logs from server.ts/aggregator.ts.
+  # Set LOG_SQL=true (separately) to additionally see every Drizzle query.
+  LOG_LEVEL: info
+  LOG_SQL: "false"
+  PORT: 3000
+  HOST: 0.0.0.0
+  PUBLIC_API_URL: http://localhost:3000
+  PUBLIC_WEB_URL: http://localhost:3001
+  DATABASE_URL: postgres://sakay:sakay@postgres:5432/sakay
+  JWT_SECRET: dev-only-jwt-secret-replace-in-prod-with-32plus-chars
+  JWT_ISSUER: sakay-api
+  JWT_TTL_SECONDS: "2592000"
+  MAGIC_LINK_TTL_SECONDS: "600"
+  EMAIL_PROVIDER: mailpit
+  EMAIL_FROM: "San Sasakay <no-reply@sansasakay.dev>"
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
+  AGGREGATOR_TICK_SECONDS: "10"
+  REPORT_DECAY_START_MINUTES: "30"
+  REPORT_EXPIRY_MINUTES: "45"
+
+services:
+  postgres:
+    # Tobi Lutke maintains this image; it bundles Postgres 16 + PostGIS + TimescaleDB.
+    # Pinned so local matches CI matches prod.
+    image: timescale/timescaledb-ha:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sakay
+      POSTGRES_PASSWORD: sakay
+      POSTGRES_DB: sakay
+      # Enable Timescale's tuned defaults.
+      TIMESCALEDB_TELEMETRY: "off"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/home/postgres/pgdata/data
+      # Auto-runs on first cluster init only. Idempotent guards inside the SQL.
+      - ./src/db/extensions.sql:/docker-entrypoint-initdb.d/00-extensions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sakay -d sakay"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mailpit:
+    # Catches all outbound mail in dev. Web UI at http://localhost:8025.
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    ports:
+      - "8025:8025" # Web UI
+      - "1025:1025" # SMTP
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+  api:
+    build:
+      context: .
+      target: dev
+    command: npm run dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    environment: *app-env
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./src:/app/src:ro
+      - ./drizzle.config.ts:/app/drizzle.config.ts:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+
+  worker:
+    build:
+      context: .
+      target: dev
+    command: npm run dev:worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *app-env
+    volumes:
+      - ./src:/app/src:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+
+volumes:
+  postgres-data:
