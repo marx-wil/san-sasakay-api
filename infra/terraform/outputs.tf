@@ -39,3 +39,8 @@ output "dns_a_record" {
   value = var.domain_name == "" ? "" : "${var.api_subdomain}.${var.domain_name} A ${aws_eip.api.public_ip}"
   description = "DNS A record for the API subdomain."
 }
+
+output "github_deploy_role_arn" {
+  value       = aws_iam_role.github_deploy.arn
+  description = "Copy into the GitHub repo secret AWS_DEPLOY_ROLE_ARN."
+}
