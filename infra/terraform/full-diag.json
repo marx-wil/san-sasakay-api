@@ -1,0 +1,16 @@
+{
+  "commands": [
+    "echo === CLOUD-INIT STATUS ===",
+    "cloud-init status --long || true",
+    "echo === /opt/sakay CONTENTS ===",
+    "ls -la /opt/sakay/ 2>&1 || echo NO_OPT_SAKAY",
+    "echo === COMPOSE FILE (first 40 lines) ===",
+    "head -n 40 /opt/sakay/docker-compose.yml 2>&1 || echo NO_COMPOSE_FILE",
+    "echo === DIRECT GHCR PULL TEST ===",
+    "docker pull ghcr.io/marx-wil/sakay-api:latest 2>&1 | tail -n 15",
+    "echo === COMPOSE PROFILES PULL ===",
+    "cd /opt/sakay && docker compose --profile app pull 2>&1 | tail -n 15",
+    "echo === COMPOSE PS ===",
+    "cd /opt/sakay && docker compose --profile app ps 2>&1"
+  ]
+}

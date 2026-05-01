@@ -1,0 +1,16 @@
+{
+  "commands": [
+    "echo '=== CONTAINERS ==='",
+    "docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}'",
+    "echo '=== POSTGRES HEALTH HISTORY ==='",
+    "docker inspect sakay-postgres-1 --format '{{json .State.Health}}' | python3 -m json.tool || echo NO_PG",
+    "echo '=== POSTGRES LOGS (last 80 lines) ==='",
+    "docker logs sakay-postgres-1 --tail 80 2>&1 || echo NO_PG_LOGS",
+    "echo '=== POSTGRES pg_isready manual ==='",
+    "docker exec sakay-postgres-1 pg_isready -U sakay -d sakay 2>&1 || echo PG_NOT_READY",
+    "echo '=== COMPOSE FILE ==='",
+    "cat /opt/sakay/docker-compose.yml",
+    "echo '=== ENV FILE (passwords redacted) ==='",
+    "grep -vE 'PASSWORD|SECRET|PASS' /opt/sakay/.env"
+  ]
+}

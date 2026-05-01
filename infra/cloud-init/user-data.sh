@@ -34,8 +34,11 @@ curl -fsSL "https://github.com/docker/compose/releases/download/v2.29.7/docker-c
 chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
 # ─── 2. application directory ───────────────────────────────────────────────
+# postgres-data is NOT a bind-mount; we use a named Docker volume instead
+# (see docker-compose.yml). The timescale/timescaledb-ha image runs as
+# UID 1000 inside the container and needs to chown the data dir on first
+# init, which Operation-not-permitteds on bind-mounts owned by root.
 install -d -m 0755 /opt/sakay
-install -d -m 0755 /opt/sakay/postgres-data
 install -d -m 0755 /opt/sakay/caddy-data
 install -d -m 0755 /opt/sakay/caddy-config
 install -d -m 0755 /var/log/caddy
@@ -111,12 +114,16 @@ services:
       POSTGRES_DB: sakay
       TIMESCALEDB_TELEMETRY: "off"
     volumes:
-      - /opt/sakay/postgres-data:/home/postgres/pgdata/data
+      - postgres_data:/home/postgres/pgdata/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sakay -d sakay"]
-      interval: 5s
-      timeout: 3s
+      interval: 10s
+      timeout: 5s
       retries: 10
+      # HA image does Patroni + initdb + PostGIS setup on first boot; on a
+      # t4g.micro that can take 60-90s. start_period gives that grace window
+      # before a failure starts counting against retries.
+      start_period: 90s
     networks: [sakaynet]
 
   caddy:
@@ -154,6 +161,9 @@ services:
     command: ["node", "dist/workers/index.js"]
     networks: [sakaynet]
 
+volumes:
+  postgres_data:
+
 networks:
   sakaynet:
     driver: bridge
@@ -177,6 +187,10 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/sakay
+# First boot of the HA postgres image can take 60-90s to init, and the app
+# profile's compose up waits for postgres healthy before starting api/worker.
+# Bump the systemd timeout so ExecStartPost doesn't get SIGTERM'd mid-init.
+TimeoutStartSec=600
 ExecStart=/usr/bin/docker compose up -d --remove-orphans postgres caddy
 ExecStartPost=-/bin/bash -c '/usr/bin/docker compose --profile app pull --ignore-pull-failures || true'
 ExecStartPost=-/bin/bash -c '/usr/bin/docker compose --profile app up -d --remove-orphans || true'

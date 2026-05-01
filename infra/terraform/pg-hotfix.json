@@ -1,0 +1,22 @@
+{
+  "commands": [
+    "set -e",
+    "cd /opt/sakay",
+    "echo '=== stopping stack ==='",
+    "docker compose --profile app down || true",
+    "echo '=== removing broken postgres bind-mount data ==='",
+    "rm -rf /opt/sakay/postgres-data",
+    "echo '=== rewriting docker-compose.yml with named volume and longer healthcheck ==='",
+    "PG_PASS=$(grep -oP '(?<=postgres://sakay:)[^@]+' /opt/sakay/.env)",
+    "IMG=$(grep -oP '(?<=image: )ghcr.io/[^\\s]+' /opt/sakay/docker-compose.yml | head -n1)",
+    "cat > /opt/sakay/docker-compose.yml <<EOF\nname: sakay\nservices:\n  postgres:\n    image: timescale/timescaledb-ha:pg16\n    restart: unless-stopped\n    environment:\n      POSTGRES_USER: sakay\n      POSTGRES_PASSWORD: ${PG_PASS}\n      POSTGRES_DB: sakay\n      TIMESCALEDB_TELEMETRY: \"off\"\n    volumes:\n      - postgres_data:/home/postgres/pgdata/data\n    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U sakay -d sakay\"]\n      interval: 10s\n      timeout: 5s\n      retries: 10\n      start_period: 90s\n    networks: [sakaynet]\n\n  caddy:\n    image: caddy:2.8-alpine\n    restart: unless-stopped\n    ports:\n      - \"80:80\"\n      - \"443:443\"\n      - \"443:443/udp\"\n    volumes:\n      - /opt/sakay/Caddyfile:/etc/caddy/Caddyfile:ro\n      - /opt/sakay/caddy-data:/data\n      - /opt/sakay/caddy-config:/config\n      - /var/log/caddy:/var/log/caddy\n    networks: [sakaynet]\n\n  api:\n    image: ${IMG}\n    profiles: [app]\n    restart: unless-stopped\n    depends_on:\n      postgres:\n        condition: service_healthy\n    env_file: /opt/sakay/.env\n    networks: [sakaynet]\n\n  worker:\n    image: ${IMG}\n    profiles: [app]\n    restart: unless-stopped\n    depends_on:\n      postgres:\n        condition: service_healthy\n    env_file: /opt/sakay/.env\n    command: [\"node\", \"dist/workers/index.js\"]\n    networks: [sakaynet]\n\nvolumes:\n  postgres_data:\n\nnetworks:\n  sakaynet:\n    driver: bridge\nEOF",
+    "echo '=== bringing postgres + caddy back up ==='",
+    "docker compose up -d --remove-orphans postgres caddy",
+    "echo '=== waiting for postgres health (up to 150s) ==='",
+    "for i in $(seq 1 30); do st=$(docker inspect sakay-postgres-1 --format '{{.State.Health.Status}}' 2>/dev/null || echo unknown); echo \"  [$i] $st\"; [ \"$st\" = \"healthy\" ] && break; sleep 5; done",
+    "echo '=== starting api + worker ==='",
+    "docker compose --profile app up -d --remove-orphans",
+    "echo '=== final state ==='",
+    "docker compose --profile app ps"
+  ]
+}
