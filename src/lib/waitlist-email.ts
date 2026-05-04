@@ -14,10 +14,7 @@ import { env } from "../config.js";
 import { logger } from "./logger.js";
 import { BRAND, mailer } from "./mail.js";
 
-export async function sendWaitlistConfirmation(
-  email: string,
-  position?: number,
-): Promise<void> {
+export async function sendWaitlistConfirmation(email: string, position?: number): Promise<void> {
   const subject = "Nasa waitlist ka na — San Sasakay";
   const year = new Date().getFullYear();
 
