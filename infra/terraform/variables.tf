@@ -40,6 +40,19 @@ variable "api_subdomain" {
   description = "Subdomain for the API (api.<domain_name>)."
 }
 
+variable "public_web_url" {
+  type        = string
+  default     = ""
+  description = <<-EOT
+    Public URL of the landing site / web app (e.g. https://sansasakay.com).
+    Used by the API for two things:
+      1. The "Mag-sign in" CTA in magic-link emails points here.
+      2. CORS allow-list in production (see src/server.ts).
+    Leave empty to fall back to https://<domain_name>; that fallback
+    lets a single-domain deploy keep working without setting this var.
+  EOT
+}
+
 variable "ghcr_image" {
   type        = string
   default     = "ghcr.io/REPLACE-ME/sakay-api:latest"

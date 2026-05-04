@@ -225,13 +225,17 @@ resource "aws_instance" "api" {
   }
 
   user_data = templatefile("${path.module}/../cloud-init/user-data.sh", {
-    domain_name        = var.domain_name
-    api_subdomain      = var.api_subdomain
-    ghcr_image         = var.ghcr_image
-    letsencrypt_email  = var.letsencrypt_email
-    s3_backup_bucket   = aws_s3_bucket.backups.bucket
-    aws_region         = var.aws_region
-    public_api_url     = var.domain_name == "" ? "" : "https://${var.api_subdomain}.${var.domain_name}"
+    domain_name       = var.domain_name
+    api_subdomain     = var.api_subdomain
+    ghcr_image        = var.ghcr_image
+    letsencrypt_email = var.letsencrypt_email
+    s3_backup_bucket  = aws_s3_bucket.backups.bucket
+    aws_region        = var.aws_region
+    public_api_url    = var.domain_name == "" ? "" : "https://${var.api_subdomain}.${var.domain_name}"
+    # Web URL is independent of the API URL: emails CTA + CORS go here.
+    # Falls back to the apex domain when not explicitly set, so a deploy
+    # with just `domain_name` set keeps working.
+    public_web_url = var.public_web_url != "" ? var.public_web_url : (var.domain_name == "" ? "" : "https://${var.domain_name}")
   })
 
   tags = {

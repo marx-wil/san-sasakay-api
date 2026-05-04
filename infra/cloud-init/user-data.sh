@@ -15,6 +15,7 @@
 #   ${s3_backup_bucket}   bucket name (Terraform-created)
 #   ${aws_region}         e.g. "ap-southeast-1"
 #   ${public_api_url}     "https://api.sansasakay.example" or ""
+#   ${public_web_url}     "https://sansasakay.example" or ""
 
 set -euxo pipefail
 
@@ -52,9 +53,20 @@ if [ -z "${public_api_url}" ]; then
     -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
   PUBLIC_IPV4=$(curl -fsS -H "X-aws-ec2-metadata-token: $${IMDS_TOKEN}" \
     "http://169.254.169.254/latest/meta-data/public-ipv4")
-  RESOLVED_PUBLIC_URL="http://$${PUBLIC_IPV4}"
+  RESOLVED_API_URL="http://$${PUBLIC_IPV4}"
 else
-  RESOLVED_PUBLIC_URL="${public_api_url}"
+  RESOLVED_API_URL="${public_api_url}"
+fi
+
+# PUBLIC_WEB_URL is the landing site (sansasakay.com) — distinct from the
+# API host. The magic-link email CTA points here, and the API's CORS
+# allow-list in production reads from this var (see src/server.ts). When
+# unset (IP-only deploy), fall back to the API URL so Zod's URL validator
+# is satisfied; the web flow simply isn't usable in that mode.
+if [ -z "${public_web_url}" ]; then
+  RESOLVED_WEB_URL="$${RESOLVED_API_URL}"
+else
+  RESOLVED_WEB_URL="${public_web_url}"
 fi
 
 cat > /opt/sakay/.env <<EOF
@@ -62,8 +74,8 @@ NODE_ENV=production
 LOG_LEVEL=info
 PORT=3000
 HOST=0.0.0.0
-PUBLIC_API_URL=$${RESOLVED_PUBLIC_URL}
-PUBLIC_WEB_URL=$${RESOLVED_PUBLIC_URL}
+PUBLIC_API_URL=$${RESOLVED_API_URL}
+PUBLIC_WEB_URL=$${RESOLVED_WEB_URL}
 DATABASE_URL=postgres://sakay:$(openssl rand -hex 16)@postgres:5432/sakay
 JWT_SECRET=$(openssl rand -base64 48)
 JWT_ISSUER=sakay-api

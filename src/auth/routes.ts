@@ -61,7 +61,13 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         expiresAt,
       });
 
-      const link = `${env.PUBLIC_API_URL}/auth/verify?token=${token}`;
+      // Email CTA points at the web (sansasakay.com), not the API. The
+      // /auth/verify page on the landing is a brand-aligned bridge: it
+      // immediately deep-links into the mobile app via the sansasakay://
+      // scheme and lets the app's DeepLinkAuthBridge consume the token.
+      // The web page never calls /auth/verify itself, so the magic token
+      // isn't burned if the user opened the email on the wrong device.
+      const link = `${env.PUBLIC_WEB_URL}/auth/verify?token=${token}`;
 
       try {
         await sendMagicLink(email, link);
