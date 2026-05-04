@@ -43,13 +43,27 @@ install -d -m 0755 /opt/sakay/caddy-data
 install -d -m 0755 /opt/sakay/caddy-config
 install -d -m 0755 /var/log/caddy
 
+# When no domain is configured, derive PUBLIC_API_URL from the instance's
+# public IPv4 (via IMDSv2) so the API's Zod env validator (which requires a
+# valid URL) doesn't reject an empty string. Magic-link emails will use the
+# IP-based URL — fine for IP-only / dev deployments.
+if [ -z "${public_api_url}" ]; then
+  IMDS_TOKEN=$(curl -fsS -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+  PUBLIC_IPV4=$(curl -fsS -H "X-aws-ec2-metadata-token: $${IMDS_TOKEN}" \
+    "http://169.254.169.254/latest/meta-data/public-ipv4")
+  RESOLVED_PUBLIC_URL="http://$${PUBLIC_IPV4}"
+else
+  RESOLVED_PUBLIC_URL="${public_api_url}"
+fi
+
 cat > /opt/sakay/.env <<EOF
 NODE_ENV=production
 LOG_LEVEL=info
 PORT=3000
 HOST=0.0.0.0
-PUBLIC_API_URL=${public_api_url}
-PUBLIC_WEB_URL=${public_api_url}
+PUBLIC_API_URL=$${RESOLVED_PUBLIC_URL}
+PUBLIC_WEB_URL=$${RESOLVED_PUBLIC_URL}
 DATABASE_URL=postgres://sakay:$(openssl rand -hex 16)@postgres:5432/sakay
 JWT_SECRET=$(openssl rand -base64 48)
 JWT_ISSUER=sakay-api
