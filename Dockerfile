@@ -47,8 +47,11 @@ ENV NODE_ENV=production \
 COPY --from=build --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/dist ./dist
 COPY --from=build --chown=app:app /app/package.json ./package.json
-COPY --from=build --chown=app:app /app/src/db/migrations ./src/db/migrations
-COPY --from=build --chown=app:app /app/src/db/extensions.sql ./src/db/extensions.sql
+# migrate.ts resolves these paths via `import.meta.url`, which at runtime
+# points into ./dist/db/. Co-locate the SQL with the compiled JS so the
+# runtime image works without extra path-mapping in code.
+COPY --from=build --chown=app:app /app/src/db/migrations ./dist/db/migrations
+COPY --from=build --chown=app:app /app/src/db/extensions.sql ./dist/db/extensions.sql
 
 USER app
 EXPOSE 3000
