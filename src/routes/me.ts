@@ -7,6 +7,14 @@ import { db } from "../db/client.js";
 import { identityProofs, pointsEvents, users } from "../db/schema.js";
 import { BadRequest, Conflict, NotFound } from "../lib/errors.js";
 
+// Anti-farming gate for redemption. Both thresholds must be met before any
+// future POST /me/redeem may debit points. The values are exposed via /me
+// so the client can render an honest "X araw + Y validated reports" hint
+// instead of a flat "locked" state. Tweaking these is a contract change —
+// keep in lockstep with the redeem handler when it ships.
+const MIN_ACCOUNT_AGE_DAYS = 7;
+const MIN_VALIDATED_REPORTS = 10;
+
 // Name fields: human-typed, generous limits, but trim and reject control
 // chars. Allow anything else (Unicode letters, spaces, apostrophes, hyphens,
 // periods — Filipino names like "Maria-Clara", "O'Reilly", "Jr." all valid).
@@ -34,14 +42,32 @@ const MeResponse = z.object({
   displayName: z.string().nullable(),
   hasEmail: z.boolean(),
   hasPhone: z.boolean(),
+  // Mirrors the same field on /auth/verify. True when the user has not yet
+  // attached a phone proof (today: !hasPhone). The mobile app's tab layout
+  // redirects to /onboarding/phone whenever this is true so existing email-
+  // only accounts get prompted for phone on next launch.
+  phoneRequired: z.boolean(),
   // True iff this user joined the pre-launch waitlist. Set when their
   // email_hash matched waitlist_signups on first magic-link verify.
-  // Client uses it to render the early-adopter badge and (in Phase 2)
-  // unlock the double-points bonus for the first 30 days.
+  // Client uses it to render the early-adopter badge and to grant the
+  // one-time +200 Sasakay Points welcome bonus on first sign-in (the
+  // actual ledger write lives in Phase 2 alongside redemption).
   isEarlyAdopter: z.boolean(),
   credibilityScore: z.number(),
   pointsBalance: z.number().int(),
   createdAt: z.string(),
+  // Eligibility envelope for points redemption. Shipped locked-by-default:
+  // until the points system credits `report_validated_by_other` events,
+  // `validatedReportsCount` is 0 for everyone and canRedeem stays false.
+  // Any future POST /me/redeem MUST re-check these thresholds server-side;
+  // do not trust the client's view of canRedeem.
+  redemption: z.object({
+    canRedeem: z.boolean(),
+    accountAgeDays: z.number().int(),
+    validatedReportsCount: z.number().int(),
+    minAccountAgeDays: z.number().int(),
+    minValidatedReports: z.number().int(),
+  }),
 });
 
 export const meRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -233,10 +259,33 @@ async function loadProfile(userId: string) {
     .from(pointsEvents)
     .where(eq(pointsEvents.userId, userId));
 
+  // Anti-farming counter: only `report_validated_by_other` events count.
+  // A self-submit alone does not move this — the credit lands when a
+  // distinct user's later report agrees with this one (worker emits the
+  // event). Until that wiring exists this is always 0, which is the
+  // intended hard-lock posture.
+  const validatedRow = await db
+    .select({ cnt: sql<number>`COUNT(*)::int` })
+    .from(pointsEvents)
+    .where(
+      and(eq(pointsEvents.userId, userId), eq(pointsEvents.kind, "report_validated_by_other")),
+    );
+
   // Prefer structured first/last; fall back to any legacy display_name we
   // never re-prompted (post-migration, pre-edit rows).
   const composed = [u.firstName, u.lastName].filter((s) => s && s.length > 0).join(" ");
   const displayName = composed.length > 0 ? composed : (u.displayName ?? null);
+
+  const hasPhone = proofs.some((p) => p.provider === "phone");
+
+  // Floor of fractional days — a 6-day-23-hour-old account is still 6 days.
+  // Math.max guards against clock skew producing a negative on a row that
+  // was just inserted.
+  const ageMs = Date.now() - u.createdAt.getTime();
+  const accountAgeDays = Math.max(0, Math.floor(ageMs / 86_400_000));
+  const validatedReportsCount = validatedRow[0]?.cnt ?? 0;
+  const canRedeem =
+    accountAgeDays >= MIN_ACCOUNT_AGE_DAYS && validatedReportsCount >= MIN_VALIDATED_REPORTS;
 
   return {
     id: u.id,
@@ -244,10 +293,18 @@ async function loadProfile(userId: string) {
     lastName: u.lastName ?? null,
     displayName,
     hasEmail: proofs.some((p) => p.provider === "email"),
-    hasPhone: proofs.some((p) => p.provider === "phone"),
+    hasPhone,
+    phoneRequired: !hasPhone,
     isEarlyAdopter: u.earlyAdopterAt !== null,
     credibilityScore: u.credibilityScore,
     pointsBalance: balanceRow[0]?.total ?? 0,
     createdAt: u.createdAt.toISOString(),
+    redemption: {
+      canRedeem,
+      accountAgeDays,
+      validatedReportsCount,
+      minAccountAgeDays: MIN_ACCOUNT_AGE_DAYS,
+      minValidatedReports: MIN_VALIDATED_REPORTS,
+    },
   };
 }

@@ -1,10 +1,10 @@
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { makeRequireAuth } from "../auth/jwt.js";
 import { db } from "../db/client.js";
-import { CROWD_LEVEL, REPORT_STATUS, reports, users } from "../db/schema.js";
-import { BadRequest } from "../lib/errors.js";
+import { CROWD_LEVEL, REPORT_STATUS, identityProofs, reports, users } from "../db/schema.js";
+import { BadRequest, Forbidden } from "../lib/errors.js";
 
 const SubmitBody = z.object({
   clientUuid: z.string().uuid(),
@@ -44,6 +44,25 @@ export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
     async (req, reply) => {
       const userId = req.currentUser?.id;
       if (!userId) throw BadRequest("NO_USER", "Missing user");
+
+      // Defense-in-depth phone gate. The mobile client already routes
+      // phone-less users to /onboarding/phone before they can reach the
+      // report sheet, but the API has to enforce its own contract — a
+      // hand-crafted request with a valid JWT must not be able to farm
+      // reports from an email-only account.
+      const [phoneProof] = await db
+        .select({ userId: identityProofs.userId })
+        .from(identityProofs)
+        .where(
+          and(eq(identityProofs.userId, userId), eq(identityProofs.provider, "phone")),
+        )
+        .limit(1);
+      if (!phoneProof) {
+        throw Forbidden(
+          "PHONE_REQUIRED",
+          "Magdagdag muna ng numero mo bago mag-report.",
+        );
+      }
 
       const body = req.body;
 

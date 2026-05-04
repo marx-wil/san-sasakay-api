@@ -25,6 +25,10 @@ const VerifyResponse = z.object({
     id: z.string().uuid(),
     displayName: z.string().nullable(),
     hasPhone: z.boolean(),
+    // Explicit "next step is phone" signal so the client doesn't have to
+    // infer the post-auth route from `hasPhone`. Today equals `!hasPhone`;
+    // when SMS-OTP ships, this will additionally require verifiedAt.
+    phoneRequired: z.boolean(),
   }),
 });
 
@@ -162,7 +166,10 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       const accessToken = app.jwt.sign({ sub: userId });
 
       if (format === "json") {
-        return { token: accessToken, user: { id: userId, displayName, hasPhone } };
+        return {
+          token: accessToken,
+          user: { id: userId, displayName, hasPhone, phoneRequired: !hasPhone },
+        };
       }
 
       const url = new URL("/auth/callback", env.PUBLIC_WEB_URL);

@@ -38,6 +38,14 @@ export const waitlistRoutes: FastifyPluginAsyncZod = async (app) => {
         tags: ["waitlist"],
         body: RequestBody,
         response: {
+          // 200 alreadyJoined — the email is already on the list. Anti-
+          // enumeration is intentionally traded off for UX clarity on
+          // this 500-row marketing list; nothing security-sensitive
+          // hangs off knowing whether an address is a member.
+          // 202 ok — fresh signup OR honeypot-tripped (we keep the bot
+          // path at 202 so a tripped probe still can't distinguish
+          // itself from a real fresh signup).
+          200: z.object({ ok: z.literal(true), alreadyJoined: z.literal(true) }),
           202: z.object({ ok: z.literal(true) }),
         },
       },
@@ -79,19 +87,8 @@ export const waitlistRoutes: FastifyPluginAsyncZod = async (app) => {
       `);
 
       const inserted = result.rows[0];
-      let isFreshSignup = false;
-      let position: number | undefined;
 
-      if (inserted) {
-        // Fresh signup. Compute the user's position for the confirmation
-        // email — cheap COUNT(*) since the table is tiny (≤500) and has
-        // an index on created_at.
-        isFreshSignup = true;
-        const posResult = await db.execute<{ pos: number }>(sql`
-          SELECT COUNT(*)::int AS pos FROM waitlist_signups
-        `);
-        position = posResult.rows[0]?.pos;
-      } else {
+      if (!inserted) {
         // Either a duplicate or the cap was hit. Check existence to tell
         // the two apart.
         const existing = await db.execute<{ id: string }>(sql`
@@ -101,18 +98,28 @@ export const waitlistRoutes: FastifyPluginAsyncZod = async (app) => {
           // No row for this hash AND insert was rejected -> cap hit.
           throw Conflict("WAITLIST_FULL", "Punô na ang waitlist");
         }
-        // Duplicate. Fall through to 202 without re-sending the email.
+        // Duplicate — surface it so the UI can render "Nasa listahan ka
+        // na" instead of pretending we just enrolled them again. Don't
+        // re-send the confirmation email; they already have it.
+        reply.code(200);
+        return { ok: true as const, alreadyJoined: true as const };
       }
 
-      if (isFreshSignup) {
-        try {
-          await sendWaitlistConfirmation(email, position);
-        } catch (err) {
-          // Don't fail the request if the email send blew up — the user
-          // is in the list, which is what matters. Same posture as
-          // /auth/request's mail-send failure path.
-          req.log.error({ err }, "waitlist confirmation send failed");
-        }
+      // Fresh signup. Compute the user's position for the confirmation
+      // email — cheap COUNT(*) since the table is tiny (≤500) and has
+      // an index on created_at.
+      const posResult = await db.execute<{ pos: number }>(sql`
+        SELECT COUNT(*)::int AS pos FROM waitlist_signups
+      `);
+      const position = posResult.rows[0]?.pos;
+
+      try {
+        await sendWaitlistConfirmation(email, position);
+      } catch (err) {
+        // Don't fail the request if the email send blew up — the user
+        // is in the list, which is what matters. Same posture as
+        // /auth/request's mail-send failure path.
+        req.log.error({ err }, "waitlist confirmation send failed");
       }
 
       reply.code(202);

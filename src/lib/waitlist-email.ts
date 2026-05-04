@@ -36,8 +36,8 @@ export async function sendWaitlistConfirmation(email: string, position?: number)
     "",
     "Ano ang susunod?",
     "Wala. Magpahinga ka muna. Pag handa na, padadalhan ka namin ng " +
-      "imbitasyon — at bilang waitlist member, may dobleng Sasakay " +
-      "Points ka sa unang 30 araw.",
+      "imbitasyon — at sa unang sign-in mo, may +200 Sasakay Points " +
+      "kang naghihintay. Welcome bonus, regalo sa pagiging maaga.",
     "",
     "—",
     "Para sa bawat Pilipinong umuuwi.",
@@ -105,9 +105,9 @@ export async function sendWaitlistConfirmation(email: string, position?: number)
                 </h2>
                 <p style="margin:0 0 16px 0;font-family:${BRAND.sans};font-size:14px;line-height:1.55;color:${BRAND.ink2};">
                   Wala. Magpahinga ka muna. Pag handa na, padadalhan ka namin
-                  ng imbitasyon — at bilang waitlist member, may
-                  <strong style="color:${BRAND.ink};font-weight:600;">dobleng Sasakay Points</strong>
-                  ka sa unang 30 araw.
+                  ng imbitasyon — at sa unang sign-in mo, may
+                  <strong style="color:${BRAND.ink};font-weight:600;">+200 Sasakay Points</strong>
+                  kang naghihintay. Welcome bonus, regalo sa pagiging maaga.
                 </p>
               </td>
             </tr>
