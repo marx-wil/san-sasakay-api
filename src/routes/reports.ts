@@ -53,15 +53,10 @@ export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
       const [phoneProof] = await db
         .select({ userId: identityProofs.userId })
         .from(identityProofs)
-        .where(
-          and(eq(identityProofs.userId, userId), eq(identityProofs.provider, "phone")),
-        )
+        .where(and(eq(identityProofs.userId, userId), eq(identityProofs.provider, "phone")))
         .limit(1);
       if (!phoneProof) {
-        throw Forbidden(
-          "PHONE_REQUIRED",
-          "Magdagdag muna ng numero mo bago mag-report.",
-        );
+        throw Forbidden("PHONE_REQUIRED", "Magdagdag muna ng numero mo bago mag-report.");
       }
 
       const body = req.body;
