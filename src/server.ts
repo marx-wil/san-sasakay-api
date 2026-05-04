@@ -41,7 +41,12 @@ async function buildServer() {
   await app.register(sensible);
 
   await app.register(cors, {
-    origin: isDev ? true : [env.PUBLIC_WEB_URL],
+    // Browsers send Origin headers as a single canonical host. People reach
+    // the landing at both `sansasakay.com` and `www.sansasakay.com` (DNS
+    // points both at the host; we don't force-redirect at the edge), so we
+    // need to allow both apex and www variants. PUBLIC_WEB_URL is the
+    // canonical one; we derive the sibling.
+    origin: isDev ? true : buildAllowedOrigins(env.PUBLIC_WEB_URL),
     credentials: false,
   });
 
@@ -138,6 +143,36 @@ async function buildServer() {
   });
 
   return app;
+}
+
+/**
+ * Expand a single canonical landing URL into the set of equivalent origins
+ * a browser might present in the `Origin` header.
+ *
+ * Today that's just (apex, www) — both forms hit the same site, but a
+ * browser sends exactly one as `Origin`. The CORS plugin compares string-
+ * equal, so we have to enumerate. If we ever serve from a third subdomain,
+ * extend the list here.
+ *
+ * Examples:
+ *   "https://sansasakay.com"      -> ["https://sansasakay.com", "https://www.sansasakay.com"]
+ *   "https://www.sansasakay.com"  -> ["https://sansasakay.com", "https://www.sansasakay.com"]
+ *   "http://localhost:3001"       -> ["http://localhost:3001"]    (dev passthrough)
+ */
+function buildAllowedOrigins(publicWebUrl: string): string[] {
+  const url = new URL(publicWebUrl);
+  const host = url.hostname;
+  // Localhost / IPs / single-label hostnames don't get a www sibling.
+  const hasDot = host.includes(".");
+  const isLocalhost = host === "localhost";
+  if (!hasDot || isLocalhost) {
+    return [`${url.protocol}//${url.host}`];
+  }
+  const apex = host.startsWith("www.") ? host.slice(4) : host;
+  const www = host.startsWith("www.") ? host : `www.${host}`;
+  // Preserve any explicit port on PUBLIC_WEB_URL (uncommon in prod, but safe).
+  const portSuffix = url.port ? `:${url.port}` : "";
+  return [`${url.protocol}//${apex}${portSuffix}`, `${url.protocol}//${www}${portSuffix}`];
 }
 
 async function start() {
