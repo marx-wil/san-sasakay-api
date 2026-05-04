@@ -19,6 +19,7 @@ import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
 import { reportRoutes } from "./routes/reports.js";
 import { transitRouteRoutes } from "./routes/transit-routes.js";
+import { waitlistRoutes } from "./routes/waitlist.js";
 import { wsRoutes } from "./routes/ws.js";
 
 async function buildServer() {
@@ -90,6 +91,7 @@ async function buildServer() {
   await app.register(meRoutes, { prefix: "/me" });
   await app.register(reportRoutes, { prefix: "/reports" });
   await app.register(transitRouteRoutes, { prefix: "/routes" });
+  await app.register(waitlistRoutes, { prefix: "/waitlist" });
   await app.register(wsRoutes); // /ws
 
   // Centralized error handler.

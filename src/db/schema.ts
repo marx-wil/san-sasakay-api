@@ -85,6 +85,9 @@ export const users = pgTable(
     credibilityScore: real("credibility_score").notNull().default(1.0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    // Stamped on first magic-link verify when the user's email_hash is found
+    // in waitlist_signups. NULL = not a waitlist member. See 0003_waitlist.sql.
+    earlyAdopterAt: timestamp("early_adopter_at", { withTimezone: true }),
   },
   (t) => ({
     createdAtIdx: index("users_created_at_idx").on(t.createdAt),
@@ -219,6 +222,29 @@ export const routeStatus = pgTable("route_status", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ─── waitlist_signups ───────────────────────────────────────────────────────
+// Pre-launch waitlist. Hash-only storage (same SHA-256 + JWT_SECRET pepper
+// as identity_proofs) — we cannot email these addresses later. The
+// "future benefits" pathway is the join against users.early_adopter_at:
+// when a waitlisted email_hash signs in via magic-link, we stamp the
+// timestamp and the app unlocks the early-adopter bonus.
+//
+// Cap (500) is enforced at the route layer, not as a CHECK constraint —
+// see src/routes/waitlist.ts for the race-safe insert.
+export const waitlistSignups = pgTable(
+  "waitlist_signups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    emailHash: text("email_hash").notNull(),
+    source: text("source"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    emailHashUq: unique("waitlist_signups_email_hash_uq").on(t.emailHash),
+    createdAtIdx: index("waitlist_signups_created_at_idx").on(t.createdAt),
+  }),
+);
+
 // ─── points_events ──────────────────────────────────────────────────────────
 // Append-only ledger. Balance = SUM(delta) WHERE user_id = ?.
 // Materialized view + Redis cache come later when this becomes hot.
@@ -252,6 +278,8 @@ export type NewReport = typeof reports.$inferInsert;
 export type RouteStatusRow = typeof routeStatus.$inferSelect;
 export type PointsEvent = typeof pointsEvents.$inferSelect;
 export type MagicLinkToken = typeof magicLinkTokens.$inferSelect;
+export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
+export type NewWaitlistSignup = typeof waitlistSignups.$inferInsert;
 
 // Re-exported `sql` for callers that need raw fragments.
 export { sql };

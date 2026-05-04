@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { env } from "../config.js";
@@ -134,6 +134,20 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const { userId, displayName, hasPhone } = await findOrCreateUserByEmailHash(row.emailHash);
+
+      // If this email is on the pre-launch waitlist, stamp the user as an
+      // early adopter the first time they sign in. Idempotent: the WHERE
+      // clause only fires when early_adopter_at is currently NULL, so the
+      // timestamp captures the actual first-sign-in moment, not later
+      // re-verifications. The mobile app reads this off /me.
+      await db.execute(sql`
+        UPDATE users SET early_adopter_at = NOW()
+        WHERE id = ${userId}::uuid
+          AND early_adopter_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM waitlist_signups WHERE email_hash = ${row.emailHash}
+          )
+      `);
 
       // Mark token used (single-use). Done after user resolution so a DB
       // failure during user creation doesn't burn the token.

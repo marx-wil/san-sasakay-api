@@ -34,6 +34,11 @@ const MeResponse = z.object({
   displayName: z.string().nullable(),
   hasEmail: z.boolean(),
   hasPhone: z.boolean(),
+  // True iff this user joined the pre-launch waitlist. Set when their
+  // email_hash matched waitlist_signups on first magic-link verify.
+  // Client uses it to render the early-adopter badge and (in Phase 2)
+  // unlock the double-points bonus for the first 30 days.
+  isEarlyAdopter: z.boolean(),
   credibilityScore: z.number(),
   pointsBalance: z.number().int(),
   createdAt: z.string(),
@@ -211,6 +216,7 @@ async function loadProfile(userId: string) {
       displayName: users.displayName,
       credibilityScore: users.credibilityScore,
       createdAt: users.createdAt,
+      earlyAdopterAt: users.earlyAdopterAt,
     })
     .from(users)
     .where(eq(users.id, userId))
@@ -239,6 +245,7 @@ async function loadProfile(userId: string) {
     displayName,
     hasEmail: proofs.some((p) => p.provider === "email"),
     hasPhone: proofs.some((p) => p.provider === "phone"),
+    isEarlyAdopter: u.earlyAdopterAt !== null,
     credibilityScore: u.credibilityScore,
     pointsBalance: balanceRow[0]?.total ?? 0,
     createdAt: u.createdAt.toISOString(),
