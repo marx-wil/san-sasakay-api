@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { type SQL, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { db } from "../db/client.js";
@@ -61,8 +61,14 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (req) => {
       const { bbox, type, include } = req.query;
-      const filters: string[] = ["tr.is_active = 1"];
-      const params: Array<string | number> = [];
+
+      // Build the WHERE via drizzle's sql template so values are bound as
+      // proper $1/$2 parameters. The previous implementation hand-rolled
+      // $-placeholders into a sql.raw(...) string and never passed the
+      // values, so Postgres saw `$1` with no binding and 500'd with
+      // `42P02 there is no parameter $1`. Also fixes a latent SQL-injection
+      // foothold if the bbox regex ever drifted.
+      const conditions: SQL[] = [sql`tr.is_active = 1`];
 
       if (bbox) {
         const parts = bbox.split(",").map(Number);
@@ -70,23 +76,22 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
           throw new Error("invalid bbox");
         }
         const [minLng, minLat, maxLng, maxLat] = parts as [number, number, number, number];
-        params.push(minLng, minLat, maxLng, maxLat);
-        filters.push(
-          `ST_Intersects(tr.geometry, ST_MakeEnvelope($${params.length - 3}, $${
-            params.length - 2
-          }, $${params.length - 1}, $${params.length}, 4326)::geography)`,
+        conditions.push(
+          sql`ST_Intersects(tr.geometry, ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326)::geography)`,
         );
       }
       if (type) {
-        params.push(type);
-        filters.push(`tr.type = $${params.length}`);
+        conditions.push(sql`tr.type = ${type}`);
       }
 
-      const where = filters.join(" AND ");
+      const whereClause = sql.join(conditions, sql` AND `);
       const includeGeom = include === "geometry";
-      const geomCol = includeGeom
-        ? `ST_AsGeoJSON(ST_Simplify(tr.geometry::geometry, ${SIMPLIFY_TOLERANCE_DEG})) AS geometry,`
-        : "";
+      // SIMPLIFY_TOLERANCE_DEG is a compile-time constant, so inlining it via
+      // sql.raw is safe and keeps the value out of the bind list (PostGIS
+      // requires it as a literal anyway).
+      const geomFragment = includeGeom
+        ? sql`ST_AsGeoJSON(ST_Simplify(tr.geometry::geometry, ${sql.raw(String(SIMPLIFY_TOLERANCE_DEG))})) AS geometry,`
+        : sql``;
 
       const result = await db.execute<{
         id: string;
@@ -98,21 +103,19 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
         confidence: number;
         report_count: number;
         last_report_at: string | null;
-      }>(
-        sql.raw(`
+      }>(sql`
         SELECT tr.id, tr.code, tr.name, tr.type,
-               ${geomCol}
+               ${geomFragment}
                COALESCE(rs.status, 'hindi_alam') AS status,
                COALESCE(rs.confidence, 0)        AS confidence,
                COALESCE(rs.report_count, 0)      AS report_count,
                rs.last_report_at
         FROM transit_routes tr
         LEFT JOIN route_status rs ON rs.route_id = tr.id
-        WHERE ${where}
+        WHERE ${whereClause}
         ORDER BY tr.code ASC
         LIMIT 500
-      `),
-      );
+      `);
 
       return {
         items: result.rows.map((r) => ({
