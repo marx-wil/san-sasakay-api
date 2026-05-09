@@ -44,7 +44,11 @@ services:
       # Enable Timescale's tuned defaults.
       TIMESCALEDB_TELEMETRY: "off"
     ports:
-      - "5432:5432"
+      # Host 5433 → container 5432. Avoids colliding with a native Windows
+      # Postgres install that already binds host:5432. In-cluster traffic
+      # (api ↔ postgres, worker ↔ postgres) still uses 5432 over the docker
+      # bridge network, unaffected.
+      - "5433:5432"
     volumes:
       - postgres-data:/home/postgres/pgdata/data
       # Auto-runs on first cluster init only. Idempotent guards inside the SQL.

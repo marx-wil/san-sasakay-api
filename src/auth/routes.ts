@@ -7,6 +7,34 @@ import { identityProofs, magicLinkTokens, users } from "../db/schema.js";
 import { BadRequest, Unauthorized } from "../lib/errors.js";
 import { generateMagicToken, hashIdentifier, hashToken, sendMagicLink } from "./magic-link.js";
 
+// #region agent log
+// Debug instrumentation. Container reaches host loopback via host.docker.internal.
+function dlog(payload: {
+  location: string;
+  message: string;
+  data?: Record<string, unknown>;
+  hypothesisId?: string;
+}): void {
+  try {
+    fetch("http://host.docker.internal:7652/ingest/12fcec5a-657d-4abd-b83d-ebfbba60b53a", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "1b02c8",
+      },
+      body: JSON.stringify({
+        sessionId: "1b02c8",
+        location: payload.location,
+        message: payload.message,
+        data: payload.data ?? {},
+        hypothesisId: payload.hypothesisId,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  } catch {}
+}
+// #endregion
+
 const RequestBody = z.object({
   email: z.string().email().max(254),
 });
@@ -52,6 +80,14 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req, reply) => {
+      // #region agent log
+      dlog({
+        location: "auth/routes.ts:/auth/request",
+        message: "handler entered",
+        data: { ip: req.ip, ua: req.headers["user-agent"]?.slice(0, 80) },
+        hypothesisId: "A,B,C",
+      });
+      // #endregion
       const { email } = req.body;
       const emailHash = hashIdentifier(email);
 
@@ -59,11 +95,30 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       const tokenHash = hashToken(token);
       const expiresAt = new Date(Date.now() + env.MAGIC_LINK_TTL_SECONDS * 1000);
 
-      await db.insert(magicLinkTokens).values({
-        tokenHash,
-        emailHash,
-        expiresAt,
-      });
+      try {
+        await db.insert(magicLinkTokens).values({
+          tokenHash,
+          emailHash,
+          expiresAt,
+        });
+        // #region agent log
+        dlog({
+          location: "auth/routes.ts:/auth/request",
+          message: "magic-link row inserted",
+          hypothesisId: "C",
+        });
+        // #endregion
+      } catch (err) {
+        // #region agent log
+        dlog({
+          location: "auth/routes.ts:/auth/request",
+          message: "magic-link insert threw",
+          data: { errMessage: (err as Error)?.message ?? String(err) },
+          hypothesisId: "C",
+        });
+        // #endregion
+        throw err;
+      }
 
       // Email CTA points at the web (sansasakay.com), not the API. The
       // /auth/verify page on the landing is a brand-aligned bridge: it
@@ -75,7 +130,25 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
 
       try {
         await sendMagicLink(email, link);
+        // #region agent log
+        dlog({
+          location: "auth/routes.ts:/auth/request",
+          message: "sendMagicLink resolved (mailpit accepted)",
+          hypothesisId: "D",
+        });
+        // #endregion
       } catch (err) {
+        // #region agent log
+        dlog({
+          location: "auth/routes.ts:/auth/request",
+          message: "sendMagicLink threw",
+          data: {
+            errMessage: (err as Error)?.message ?? String(err),
+            smtpHost: env.SMTP_HOST,
+          },
+          hypothesisId: "D",
+        });
+        // #endregion
         // Don't leak send failures to the client. Log + still return 202.
         req.log.error({ err }, "magic-link send failed");
       }

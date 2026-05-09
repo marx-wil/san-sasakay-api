@@ -14,6 +14,10 @@ const RouteSummary = z.object({
   confidence: z.number(),
   reportCount: z.number().int(),
   lastReportAt: z.string().nullable(),
+  // Present only when the request asked for `?include=geometry`. GeoJSON
+  // LineString, simplified server-side to keep the list payload light
+  // for map overlays. Use GET /routes/:id for full-fidelity geometry.
+  geometry: z.unknown().nullable().optional(),
 });
 
 const RouteDetail = RouteSummary.extend({
@@ -28,8 +32,17 @@ const RouteDetail = RouteSummary.extend({
   ),
 });
 
+// Douglas-Peucker tolerance in degrees (~10 m at the equator). Cuts vertex
+// counts roughly 5–10× for typical jeepney route geometries — small enough
+// that the simplified line still hugs the road at city zoom levels, big
+// enough that a full Metro Manila bundle stays well under 1 MB.
+const SIMPLIFY_TOLERANCE_DEG = 0.0001;
+
 export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
-  // GET /routes?bbox=minLng,minLat,maxLng,maxLat — list routes intersecting a bbox.
+  // GET /routes?bbox=minLng,minLat,maxLng,maxLat&type=...&include=geometry
+  // Lists routes intersecting an optional bbox. When include=geometry is
+  // passed, each row carries a simplified GeoJSON LineString so the mobile
+  // map can render polylines without a follow-up N+1 round-trip per route.
   app.get(
     "/",
     {
@@ -41,12 +54,13 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
             .regex(/^-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?$/)
             .optional(),
           type: z.enum(TRANSIT_TYPE).optional(),
+          include: z.enum(["geometry"]).optional(),
         }),
         response: { 200: z.object({ items: z.array(RouteSummary) }) },
       },
     },
     async (req) => {
-      const { bbox, type } = req.query;
+      const { bbox, type, include } = req.query;
       const filters: string[] = ["tr.is_active = 1"];
       const params: Array<string | number> = [];
 
@@ -69,11 +83,17 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const where = filters.join(" AND ");
+      const includeGeom = include === "geometry";
+      const geomCol = includeGeom
+        ? `ST_AsGeoJSON(ST_Simplify(tr.geometry::geometry, ${SIMPLIFY_TOLERANCE_DEG})) AS geometry,`
+        : "";
+
       const result = await db.execute<{
         id: string;
         code: string;
         name: string;
         type: (typeof TRANSIT_TYPE)[number];
+        geometry?: string | null;
         status: (typeof ROUTE_STATUS)[number];
         confidence: number;
         report_count: number;
@@ -81,6 +101,7 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
       }>(
         sql.raw(`
         SELECT tr.id, tr.code, tr.name, tr.type,
+               ${geomCol}
                COALESCE(rs.status, 'hindi_alam') AS status,
                COALESCE(rs.confidence, 0)        AS confidence,
                COALESCE(rs.report_count, 0)      AS report_count,
@@ -89,7 +110,7 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
         LEFT JOIN route_status rs ON rs.route_id = tr.id
         WHERE ${where}
         ORDER BY tr.code ASC
-        LIMIT 200
+        LIMIT 500
       `),
       );
 
@@ -103,6 +124,7 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
           confidence: r.confidence,
           reportCount: r.report_count,
           lastReportAt: r.last_report_at ? new Date(r.last_report_at).toISOString() : null,
+          ...(includeGeom ? { geometry: r.geometry ? JSON.parse(r.geometry) : null } : {}),
         })),
       };
     },

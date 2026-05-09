@@ -1,63 +1,133 @@
 /**
- * Dev seed. Inserts a handful of Metro Manila jeepney/UV-Express routes for
- * local testing. Idempotent: ON CONFLICT DO NOTHING on `code`.
+ * Dev seed for `transit_routes`. Reads the cached OpenStreetMap export
+ * at `data/osm-routes/metro-manila.geojson` (produced by
+ * `npm run osm:fetch`) and upserts each LTFRB-PUJ / UV Express route.
+ *
+ * Idempotent: ON CONFLICT (code) DO UPDATE refreshes name + type +
+ * geometry on every run, so re-seeding after a fresh `osm:fetch`
+ * propagates upstream OSM edits to the DB without manual SQL.
+ *
+ * Code naming:
+ *   - Prefer `JEEP-<ref>` / `UV-<ref>` for routes that have an LTFRB
+ *     route number tagged on the OSM relation (e.g. "T101", "300").
+ *   - Fall back to `OSM-<relationId>` for routes without a ref.
+ *
+ * If multiple OSM relations share a ref (forward+backward, or rival
+ * operators), the longest geometry wins — that's a reasonable proxy
+ * for the canonical full-loop relation in this dataset.
  *
  * Usage:
- *   npm run db:seed
+ *   npm run osm:fetch     # writes the GeoJSON cache (~1 min)
+ *   npm run db:seed       # this script (a few seconds against local pg)
  */
 
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 import { db, pool } from "./client.js";
 
-const ROUTES = [
-  {
-    code: "JEEP-001",
-    name: "Cubao - Quiapo via España",
-    type: "jeepney",
-    line: "LINESTRING(121.0560 14.6206, 121.0500 14.6118, 121.0400 14.6020, 121.0260 14.5996)",
-  },
-  {
-    code: "JEEP-002",
-    name: "Monumento - Pier",
-    type: "jeepney",
-    line: "LINESTRING(120.9836 14.6541, 120.9785 14.6300, 120.9700 14.6010, 120.9650 14.5870)",
-  },
-  {
-    code: "JEEP-014",
-    name: "Crossing - Cogeo via Marcos Highway",
-    type: "jeepney",
-    line: "LINESTRING(121.0670 14.5780, 121.1010 14.6210, 121.1340 14.6480, 121.1700 14.6650)",
-  },
-  {
-    code: "UV-007",
-    name: "Fairview - Makati via C5",
-    type: "uv_express",
-    line: "LINESTRING(121.0700 14.7100, 121.0780 14.6450, 121.0510 14.5530)",
-  },
-  {
-    code: "P2P-021",
-    name: "Alabang - Ortigas",
-    type: "p2p_bus",
-    line: "LINESTRING(121.0420 14.4220, 121.0600 14.5870)",
-  },
-] as const;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const GEOJSON_PATH = join(__dirname, "..", "..", "data", "osm-routes", "metro-manila.geojson");
 
-async function seed() {
-  logger.info("seeding transit_routes");
-  for (const r of ROUTES) {
-    await db.execute(sql`
-      INSERT INTO transit_routes (code, name, type, geometry)
-      VALUES (
-        ${r.code},
-        ${r.name},
-        ${r.type},
-        ${`SRID=4326;${r.line}`}::geography
-      )
-      ON CONFLICT (code) DO NOTHING
-    `);
+type RouteType = "jeepney" | "uv_express";
+
+type RouteFeature = {
+  type: "Feature";
+  properties: {
+    ref: string | null;
+    name: string;
+    type: RouteType;
+    osmRelationId: number;
+    network: string | null;
+    operator: string | null;
+  };
+  geometry: { type: "LineString"; coordinates: [number, number][] };
+};
+
+type RouteFeatureCollection = {
+  type: "FeatureCollection";
+  features: RouteFeature[];
+};
+
+const TYPE_PREFIX: Record<RouteType, string> = {
+  jeepney: "JEEP",
+  uv_express: "UV",
+};
+
+function codeFor(f: RouteFeature): string {
+  const ref = f.properties.ref?.trim();
+  if (ref) return `${TYPE_PREFIX[f.properties.type]}-${ref}`;
+  return `OSM-${f.properties.osmRelationId}`;
+}
+
+/**
+ * When two OSM relations collapse to the same code, keep the one with
+ * the most coordinates. Best-effort canonical-route picker — see
+ * file header.
+ */
+function dedupeByCode(features: RouteFeature[]): RouteFeature[] {
+  const best = new Map<string, RouteFeature>();
+  for (const f of features) {
+    const code = codeFor(f);
+    const prev = best.get(code);
+    if (!prev || f.geometry.coordinates.length > prev.geometry.coordinates.length) {
+      best.set(code, f);
+    }
   }
-  logger.info({ count: ROUTES.length }, "seed complete");
+  return [...best.values()];
+}
+
+async function seed(): Promise<void> {
+  let raw: string;
+  try {
+    raw = await readFile(GEOJSON_PATH, "utf8");
+  } catch (err) {
+    logger.error(
+      { path: GEOJSON_PATH, err },
+      "GeoJSON cache missing. Run `npm run osm:fetch` first.",
+    );
+    throw err;
+  }
+
+  const fc = JSON.parse(raw) as RouteFeatureCollection;
+  const features = dedupeByCode(fc.features);
+
+  logger.info({ total: fc.features.length, unique: features.length }, "Loaded OSM routes");
+
+  let upserted = 0;
+  let skipped = 0;
+
+  for (const f of features) {
+    if (f.geometry.coordinates.length < 2) {
+      skipped++;
+      continue;
+    }
+    const code = codeFor(f);
+    const geomJson = JSON.stringify(f.geometry);
+    try {
+      await db.execute(sql`
+        INSERT INTO transit_routes (code, name, type, geometry)
+        VALUES (
+          ${code},
+          ${f.properties.name},
+          ${f.properties.type},
+          ST_SetSRID(ST_GeomFromGeoJSON(${geomJson}), 4326)::geography
+        )
+        ON CONFLICT (code) DO UPDATE
+          SET name = EXCLUDED.name,
+              type = EXCLUDED.type,
+              geometry = EXCLUDED.geometry
+      `);
+      upserted++;
+    } catch (err) {
+      skipped++;
+      logger.warn({ code, err }, "skip route on insert error");
+    }
+  }
+
+  logger.info({ upserted, skipped }, "seed complete");
 }
 
 seed()

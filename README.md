@@ -693,6 +693,41 @@ Services](https://docs.github.com/en/actions/deployment/security-hardening-your-
 The role needs only `ssm:SendCommand` on `arn:aws:ec2:*:*:instance/<id>` and
 `ssm:ListCommandInvocations`.
 
+### Seeding `transit_routes` in production
+
+Migrations apply automatically on container boot (see
+[`src/server.ts`](src/server.ts)). The OSM route seed does **not** —
+it's a one-shot script that should run after the first deploy and again
+after each refresh of upstream OSM data.
+
+The Docker build embeds a fresh `data/osm-routes/metro-manila.geojson`
+by running `npm run osm:fetch` against the Overpass API during the
+`build` stage. So every deployed image carries a current OSM snapshot
+ready to load. To actually load it:
+
+```bash
+INSTANCE_ID=$(aws ssm describe-instance-information \
+  --filters "Key=tag:Name,Values=sakay-api-prod-ec2" \
+  --query 'InstanceInformationList[0].InstanceId' --output text \
+  --region ap-southeast-1)
+
+aws ssm send-command \
+  --instance-ids "$INSTANCE_ID" \
+  --document-name AWS-RunShellScript \
+  --comment "Seed transit_routes from OSM" \
+  --parameters 'commands=["cd /opt/sakay && docker compose run --rm api node dist/db/seed.js"]' \
+  --region ap-southeast-1
+```
+
+Idempotent: the seed upserts via `ON CONFLICT (code) DO UPDATE`, so
+re-running it after a fresh deploy propagates upstream OSM edits to the
+DB without manual SQL.
+
+Build-time tradeoff: if Overpass is unreachable when CI runs, the image
+build fails. That's deliberate — silently shipping a stale OSM snapshot
+hides drift. Re-trigger the workflow when Overpass recovers (it usually
+does within minutes).
+
 ---
 
 ## Operations runbook

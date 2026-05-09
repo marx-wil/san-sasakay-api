@@ -6,7 +6,10 @@ dist
 .github
 .vscode
 infra
-scripts
 *.md
 .postgres-data
 .mailpit-data
+# data/ is regenerated at build time by `npm run osm:fetch`. Excluding it
+# from the build context guarantees a deterministic fetch (a dev's stale
+# local cache can't sneak into the image) and keeps the upload small.
+data
