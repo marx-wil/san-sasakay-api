@@ -9,7 +9,7 @@
  * Templates that send mail import { mailer, BRAND } from here.
  */
 
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { Resend } from "resend";
 import { env } from "../config.js";
 
 export interface MailProvider {
@@ -43,8 +43,15 @@ class MailpitProvider implements MailProvider {
   }
 }
 
-class SesProvider implements MailProvider {
-  private client = new SESClient({ region: env.AWS_REGION });
+class ResendProvider implements MailProvider {
+  private resend: Resend;
+
+  constructor() {
+    if (!env.RESEND_API_KEY) {
+      throw new Error("RESEND_API_KEY is required when EMAIL_PROVIDER=resend");
+    }
+    this.resend = new Resend(env.RESEND_API_KEY);
+  }
 
   async send(args: {
     to: string;
@@ -52,19 +59,16 @@ class SesProvider implements MailProvider {
     text: string;
     html: string;
   }): Promise<void> {
-    await this.client.send(
-      new SendEmailCommand({
-        Source: env.EMAIL_FROM,
-        Destination: { ToAddresses: [args.to] },
-        Message: {
-          Subject: { Data: args.subject, Charset: "UTF-8" },
-          Body: {
-            Text: { Data: args.text, Charset: "UTF-8" },
-            Html: { Data: args.html, Charset: "UTF-8" },
-          },
-        },
-      }),
-    );
+    const { error } = await this.resend.emails.send({
+      from: env.EMAIL_FROM,
+      to: args.to,
+      subject: args.subject,
+      text: args.text,
+      html: args.html,
+    });
+    if (error) {
+      throw new Error(`Resend failed: ${error.message}`);
+    }
   }
 }
 
@@ -75,7 +79,7 @@ function stripAddress(emailFrom: string): string {
 }
 
 export const mailer: MailProvider =
-  env.EMAIL_PROVIDER === "ses" ? new SesProvider() : new MailpitProvider();
+  env.EMAIL_PROVIDER === "resend" ? new ResendProvider() : new MailpitProvider();
 
 /**
  * Brand tokens, mirrored from landing/src/app/globals.css. Email clients

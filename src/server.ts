@@ -15,6 +15,7 @@ import { env, isDev } from "./config.js";
 import { migrate } from "./db/migrate.js";
 import { AppError } from "./lib/errors.js";
 import { logger } from "./lib/logger.js";
+import { placesRoutes } from "./places/routes.js";
 import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
 import { reportRoutes } from "./routes/reports.js";
@@ -96,6 +97,7 @@ async function buildServer() {
   await app.register(meRoutes, { prefix: "/me" });
   await app.register(reportRoutes, { prefix: "/reports" });
   await app.register(transitRouteRoutes, { prefix: "/routes" });
+  await app.register(placesRoutes, { prefix: "/places" });
   await app.register(waitlistRoutes, { prefix: "/waitlist" });
   await app.register(wsRoutes); // /ws
 

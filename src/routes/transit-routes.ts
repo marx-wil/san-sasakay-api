@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db/client.js";
 import { ROUTE_STATUS, TRANSIT_TYPE } from "../db/schema.js";
 import { NotFound } from "../lib/errors.js";
+import { LATLNG_RE, parseLatLng } from "../lib/latlng.js";
 
 const RouteSummary = z.object({
   id: z.string().uuid(),
@@ -38,11 +39,41 @@ const RouteDetail = RouteSummary.extend({
 // enough that a full Metro Manila bundle stays well under 1 MB.
 const SIMPLIFY_TOLERANCE_DEG = 0.0001;
 
+// Default walk radius for "this route serves my origin / destination".
+// 400 m ≈ 5 minutes on foot. Anything smaller starts excluding routes
+// that pass on the next block over (a normal interchange in Manila);
+// anything bigger silently merges adjacent corridors into one result
+// set, which is misleading for an "ano ang ruta" answer.
+const DEFAULT_NEAR_RADIUS_M = 400;
+const MIN_NEAR_RADIUS_M = 50;
+const MAX_NEAR_RADIUS_M = 2000;
+
 export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
-  // GET /routes?bbox=minLng,minLat,maxLng,maxLat&type=...&include=geometry
-  // Lists routes intersecting an optional bbox. When include=geometry is
-  // passed, each row carries a simplified GeoJSON LineString so the mobile
-  // map can render polylines without a follow-up N+1 round-trip per route.
+  // GET /routes — list routes for the map and the search sheet.
+  //
+  // Query params (all optional):
+  //   bbox=minLng,minLat,maxLng,maxLat
+  //     Spatial filter — intersect the route polyline with the envelope.
+  //     Used by the map for viewport-scoped fetches.
+  //   type=<jeepney|uv_express|...>
+  //     Narrow to a single transit class. Drives the filter pills.
+  //   include=geometry
+  //     Ship a simplified GeoJSON LineString on each row. Default is
+  //     OFF for the polling path so status refreshes are cheap.
+  //   q=<text>
+  //     Free-text match on route `name` and `code` (case-insensitive
+  //     substring). Cheap "ano ang ruta na…" search for users who type
+  //     a route name directly.
+  //   nearOrigin=lat,lng & nearDest=lat,lng
+  //     The search-sheet O→D candidate path: returns routes whose
+  //     polyline passes within `radius` metres of BOTH points. When
+  //     only one of the two is supplied we filter by that single
+  //     point — handy for "what runs through here?" exploration. Sort
+  //     order shifts to "smallest combined distance to the two pins"
+  //     so the most-relevant route ends up at the top of the list.
+  //   radius=<metres>
+  //     Walk-distance threshold for `nearOrigin`/`nearDest`. Default 400 m,
+  //     clamped to [50, 2000].
   app.get(
     "/",
     {
@@ -55,12 +86,16 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
             .optional(),
           type: z.enum(TRANSIT_TYPE).optional(),
           include: z.enum(["geometry"]).optional(),
+          q: z.string().min(1).max(120).optional(),
+          nearOrigin: z.string().regex(LATLNG_RE).optional(),
+          nearDest: z.string().regex(LATLNG_RE).optional(),
+          radius: z.coerce.number().int().positive().optional(),
         }),
         response: { 200: z.object({ items: z.array(RouteSummary) }) },
       },
     },
     async (req) => {
-      const { bbox, type, include } = req.query;
+      const { bbox, type, include, q, nearOrigin, nearDest, radius } = req.query;
 
       // Build the WHERE via drizzle's sql template so values are bound as
       // proper $1/$2 parameters. The previous implementation hand-rolled
@@ -83,6 +118,46 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
       if (type) {
         conditions.push(sql`tr.type = ${type}`);
       }
+      if (q) {
+        // ILIKE on (name, code) is plenty for ~300 routes. If/when the
+        // catalog grows enough to need it we'll add a tsvector + GIN.
+        // The leading/trailing % wildcards inhibit any name-prefix index
+        // anyway, so a tsvector switch is the right call later, not a
+        // half-step like trigram pg_trgm.
+        const like = `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+        conditions.push(sql`(tr.name ILIKE ${like} OR tr.code ILIKE ${like})`);
+      }
+
+      // ─── Walk-radius filter for the search sheet ────────────────────
+      // The geography column lets ST_DWithin take metres directly with
+      // no projection dance. `radius` is clamped because both extremes
+      // are bad UX — too tight and a 250 m walk excludes the route the
+      // user was hunting; too loose and "near" loses meaning.
+      const clampedRadius = radius
+        ? Math.min(Math.max(radius, MIN_NEAR_RADIUS_M), MAX_NEAR_RADIUS_M)
+        : DEFAULT_NEAR_RADIUS_M;
+      let originPt: { lat: number; lng: number } | null = null;
+      let destPt: { lat: number; lng: number } | null = null;
+      if (nearOrigin) {
+        try {
+          originPt = parseLatLng(nearOrigin);
+        } catch {
+          throw new Error("invalid nearOrigin");
+        }
+        conditions.push(
+          sql`ST_DWithin(tr.geometry, ST_MakePoint(${originPt.lng}, ${originPt.lat})::geography, ${clampedRadius})`,
+        );
+      }
+      if (nearDest) {
+        try {
+          destPt = parseLatLng(nearDest);
+        } catch {
+          throw new Error("invalid nearDest");
+        }
+        conditions.push(
+          sql`ST_DWithin(tr.geometry, ST_MakePoint(${destPt.lng}, ${destPt.lat})::geography, ${clampedRadius})`,
+        );
+      }
 
       const whereClause = sql.join(conditions, sql` AND `);
       const includeGeom = include === "geometry";
@@ -92,6 +167,20 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
       const geomFragment = includeGeom
         ? sql`ST_AsGeoJSON(ST_Simplify(tr.geometry::geometry, ${sql.raw(String(SIMPLIFY_TOLERANCE_DEG))})) AS geometry,`
         : sql``;
+
+      // When we have OD pins, sort routes by how close they pass to
+      // each of the two — a route that grazes both endpoints by 50 m
+      // outranks one that swings 380 m wide of each. Falls through to
+      // the catalogue's natural code order when no OD context exists.
+      const orderClause =
+        originPt && destPt
+          ? sql`ORDER BY (ST_Distance(tr.geometry, ST_MakePoint(${originPt.lng}, ${originPt.lat})::geography)
+                       + ST_Distance(tr.geometry, ST_MakePoint(${destPt.lng}, ${destPt.lat})::geography)) ASC`
+          : originPt
+            ? sql`ORDER BY ST_Distance(tr.geometry, ST_MakePoint(${originPt.lng}, ${originPt.lat})::geography) ASC`
+            : destPt
+              ? sql`ORDER BY ST_Distance(tr.geometry, ST_MakePoint(${destPt.lng}, ${destPt.lat})::geography) ASC`
+              : sql`ORDER BY tr.code ASC`;
 
       const result = await db.execute<{
         id: string;
@@ -113,7 +202,7 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
         FROM transit_routes tr
         LEFT JOIN route_status rs ON rs.route_id = tr.id
         WHERE ${whereClause}
-        ORDER BY tr.code ASC
+        ${orderClause}
         LIMIT 500
       `);
 

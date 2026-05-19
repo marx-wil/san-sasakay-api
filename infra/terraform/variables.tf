@@ -70,3 +70,10 @@ variable "ssh_pubkey" {
   default     = ""
   description = "Optional SSH public key. Leave empty to use EC2 Instance Connect only."
 }
+
+variable "resend_api_key" {
+  type        = string
+  default     = ""
+  description = "Resend API key for sending emails."
+  sensitive   = true
+}

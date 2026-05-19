@@ -231,6 +231,7 @@ resource "aws_instance" "api" {
     letsencrypt_email = var.letsencrypt_email
     s3_backup_bucket  = aws_s3_bucket.backups.bucket
     aws_region        = var.aws_region
+    resend_api_key    = var.resend_api_key
     public_api_url    = var.domain_name == "" ? "" : "https://${var.api_subdomain}.${var.domain_name}"
     # Web URL is independent of the API URL: emails CTA + CORS go here.
     # Falls back to the apex domain when not explicitly set, so a deploy

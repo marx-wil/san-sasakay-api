@@ -29,7 +29,8 @@ const EnvSchema = z.object({
 
   MAGIC_LINK_TTL_SECONDS: z.coerce.number().int().positive().default(600),
 
-  EMAIL_PROVIDER: z.enum(["mailpit", "ses"]).default("mailpit"),
+  EMAIL_PROVIDER: z.enum(["mailpit", "resend"]).default("mailpit"),
+  RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().min(1),
 
   SMTP_HOST: z.string().default("mailpit"),
@@ -44,6 +45,19 @@ const EnvSchema = z.object({
   AGGREGATOR_TICK_SECONDS: z.coerce.number().int().positive().default(10),
   REPORT_DECAY_START_MINUTES: z.coerce.number().int().positive().default(30),
   REPORT_EXPIRY_MINUTES: z.coerce.number().int().positive().default(45),
+
+  // ─── Geocoding (place search proxy) ──────────────────────────────────────
+  // We proxy a Nominatim-compatible geocoder so the mobile app never talks
+  // to the upstream directly: keeps our User-Agent identifying San Sasakay
+  // (per Nominatim usage policy), centralises rate-limit + LRU cache, and
+  // lets us swap providers (LocationIQ, Mapbox, self-hosted) without an
+  // app release. Default points at the public Nominatim instance — fine
+  // for dev, but we should self-host or pay for production at any scale.
+  NOMINATIM_URL: z.string().url().default("https://nominatim.openstreetmap.org"),
+  NOMINATIM_USER_AGENT: z.string().min(1).default("SanSasakay/0.1 (https://sansasakay.com)"),
+  // Optional contact email appended to the User-Agent — Nominatim explicitly
+  // asks for one. Omit if you've baked it into NOMINATIM_USER_AGENT already.
+  NOMINATIM_CONTACT_EMAIL: z.string().email().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
