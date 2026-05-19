@@ -75,7 +75,7 @@ services:
     build:
       context: .
       target: dev
-    command: npm run dev
+    command: npx tsx watch src/server.ts
     restart: unless-stopped
     depends_on:
       postgres:
@@ -94,7 +94,7 @@ services:
     build:
       context: .
       target: dev
-    command: npm run dev:worker
+    command: npx tsx watch src/workers/index.ts
     restart: unless-stopped
     depends_on:
       postgres:
