@@ -27,12 +27,12 @@ FROM node:20-bookworm-slim AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Fetch fresh OSM route geometries before pruning devDependencies (the
-# fetcher is a tsx script, and tsx itself is a devDependency). The output
-# at data/osm-routes/metro-manila.geojson is consumed at deploy time by
-# `node dist/db/seed.js` against the prod DB. Build fails if Overpass is
-# unreachable — that's intentional, deploys against a stale OSM dataset
-# would silently drift from upstream.
+# In CI, the deploy workflow runs `npm run osm:fetch` on the runner before
+# invoking docker build, so data/osm-routes/metro-manila.geojson arrives in
+# the build context and the script exits early (cache-fresh check). The fetch
+# here is a safety net for local builds and for the case where Overpass is
+# reachable but the file is missing. If Overpass is unreachable AND a stale
+# file is already present, the script warns but continues (non-fatal).
 RUN npm run osm:fetch && \
     npm run build && \
     npm prune --omit=dev

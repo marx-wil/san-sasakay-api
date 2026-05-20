@@ -219,7 +219,27 @@ async function main(): Promise<void> {
   }
 
   process.stdout.write("Fetching from Overpass (~30-90s)...\n");
-  const data = await fetchOverpass();
+
+  let data: OverpassResponse;
+  try {
+    data = await fetchOverpass();
+  } catch (err) {
+    // If Overpass is unreachable but a (possibly stale) cache file exists,
+    // warn and reuse it rather than failing the build. The seeded routes will
+    // be slightly out of date but the service stays deployable.
+    // Fail hard only when there is no file at all — without it, seed.ts has
+    // nothing to import.
+    try {
+      await stat(OUTPUT_FILE);
+      process.stderr.write(
+        `WARNING: Overpass fetch failed (${(err as Error).message}). ` +
+          `Reusing stale cache at ${OUTPUT_FILE}.\n`,
+      );
+      return;
+    } catch {
+      throw err;
+    }
+  }
 
   const nodeMap = new Map<number, Coord>();
   const wayMap = new Map<number, number[]>();

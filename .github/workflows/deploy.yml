@@ -33,6 +33,21 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # Pre-fetch OSM route data on the runner so the file lands in the Docker
+      # build context. The fetch-osm-routes script checks mtime; a file that
+      # was just written will be treated as a fresh cache and the in-Docker
+      # Overpass call is skipped entirely. This removes the network dependency
+      # from inside the Docker build layer.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Fetch OSM route data
+        run: |
+          npm ci --include=dev
+          npm run osm:fetch
+
       - id: meta
         run: |
           tag="$(echo ${GITHUB_SHA} | cut -c1-12)"
