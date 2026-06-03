@@ -4,7 +4,14 @@ import { z } from "zod";
 import { makeRequireAuth } from "../auth/jwt.js";
 import { hashIdentifier, normalizePhPhone } from "../auth/magic-link.js";
 import { db } from "../db/client.js";
-import { identityProofs, pointsEvents, users } from "../db/schema.js";
+import {
+  identityProofs,
+  pointsEvents,
+  ROUTE_STATUS,
+  TRANSIT_TYPE,
+  userSavedRoutes,
+  users,
+} from "../db/schema.js";
 import { BadRequest, Conflict, NotFound } from "../lib/errors.js";
 
 // Anti-farming gate for redemption. Both thresholds must be met before any
@@ -220,6 +227,126 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
         .where(and(eq(identityProofs.userId, userId), eq(identityProofs.provider, "phone")));
 
       return loadProfile(userId);
+    },
+  );
+
+  // ─── Saved routes ────────────────────────────────────────────────────────
+
+  const SavedRouteSummarySchema = z.object({
+    id: z.string().uuid(),
+    code: z.string(),
+    name: z.string(),
+    type: z.enum(TRANSIT_TYPE),
+    status: z.enum(ROUTE_STATUS),
+    confidence: z.number(),
+    reportCount: z.number().int(),
+    lastReportAt: z.string().nullable(),
+    savedAt: z.string(),
+  });
+
+  // GET /me/saved-routes — list routes the user has bookmarked, with
+  // current aggregated status from route_status.
+  app.get(
+    "/saved-routes",
+    {
+      preHandler: [requireAuth],
+      schema: {
+        tags: ["me"],
+        response: { 200: z.object({ items: z.array(SavedRouteSummarySchema) }) },
+      },
+    },
+    async (req) => {
+      const userId = req.currentUser?.id;
+      if (!userId) throw NotFound("USER_NOT_FOUND", "User not found");
+
+      const rows = await db.execute<{
+        id: string;
+        code: string;
+        name: string;
+        type: (typeof TRANSIT_TYPE)[number];
+        status: (typeof ROUTE_STATUS)[number];
+        confidence: number;
+        report_count: number;
+        last_report_at: string | null;
+        saved_at: string;
+      }>(sql`
+        SELECT tr.id, tr.code, tr.name, tr.type,
+               COALESCE(rs.status, 'hindi_alam')  AS status,
+               COALESCE(rs.confidence, 0)         AS confidence,
+               COALESCE(rs.report_count, 0)       AS report_count,
+               rs.last_report_at,
+               usr.saved_at
+        FROM   user_saved_routes usr
+        JOIN   transit_routes tr ON tr.id = usr.route_id
+        LEFT   JOIN route_status rs ON rs.route_id = tr.id
+        WHERE  usr.user_id = ${userId}::uuid
+        ORDER  BY usr.saved_at DESC
+      `);
+
+      return {
+        items: rows.rows.map((r) => ({
+          id: r.id,
+          code: r.code,
+          name: r.name,
+          type: r.type,
+          status: r.status,
+          confidence: r.confidence,
+          reportCount: r.report_count,
+          lastReportAt: r.last_report_at ? new Date(r.last_report_at).toISOString() : null,
+          savedAt: new Date(r.saved_at).toISOString(),
+        })),
+      };
+    },
+  );
+
+  // POST /me/saved-routes — bookmark a route. Idempotent (ON CONFLICT DO NOTHING).
+  app.post(
+    "/saved-routes",
+    {
+      preHandler: [requireAuth],
+      schema: {
+        tags: ["me"],
+        body: z.object({ routeId: z.string().uuid() }),
+        response: { 200: z.object({ ok: z.literal(true) }) },
+      },
+    },
+    async (req) => {
+      const userId = req.currentUser?.id;
+      if (!userId) throw NotFound("USER_NOT_FOUND", "User not found");
+
+      const { routeId } = req.body;
+      await db.execute(sql`
+        INSERT INTO user_saved_routes (user_id, route_id)
+        VALUES (${userId}::uuid, ${routeId}::uuid)
+        ON CONFLICT DO NOTHING
+      `);
+
+      return { ok: true as const };
+    },
+  );
+
+  // DELETE /me/saved-routes/:routeId — remove a bookmark. Idempotent.
+  app.delete(
+    "/saved-routes/:routeId",
+    {
+      preHandler: [requireAuth],
+      schema: {
+        tags: ["me"],
+        params: z.object({ routeId: z.string().uuid() }),
+        response: { 200: z.object({ ok: z.literal(true) }) },
+      },
+    },
+    async (req) => {
+      const userId = req.currentUser?.id;
+      if (!userId) throw NotFound("USER_NOT_FOUND", "User not found");
+
+      const { routeId } = req.params;
+      await db.execute(sql`
+        DELETE FROM user_saved_routes
+        WHERE user_id = ${userId}::uuid AND route_id = ${routeId}::uuid
+      `);
+
+      return { ok: true as const };
     },
   );
 };

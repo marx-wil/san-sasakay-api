@@ -245,6 +245,27 @@ export const waitlistSignups = pgTable(
   }),
 );
 
+// ─── user_saved_routes ──────────────────────────────────────────────────────
+// User-bookmarked transit routes. Shown on the home screen with live
+// aggregated status. Simple join table; default sort is saved_at DESC.
+// At most a few dozen rows per user at MVP — no pagination needed.
+export const userSavedRoutes = pgTable(
+  "user_saved_routes",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    routeId: uuid("route_id")
+      .notNull()
+      .references(() => transitRoutes.id, { onDelete: "cascade" }),
+    savedAt: timestamp("saved_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.routeId] }),
+    userIdx: index("user_saved_routes_user_idx").on(t.userId),
+  }),
+);
+
 // ─── points_events ──────────────────────────────────────────────────────────
 // Append-only ledger. Balance = SUM(delta) WHERE user_id = ?.
 // Materialized view + Redis cache come later when this becomes hot.
@@ -277,6 +298,7 @@ export type Report = typeof reports.$inferSelect;
 export type NewReport = typeof reports.$inferInsert;
 export type RouteStatusRow = typeof routeStatus.$inferSelect;
 export type PointsEvent = typeof pointsEvents.$inferSelect;
+export type UserSavedRoute = typeof userSavedRoutes.$inferSelect;
 export type MagicLinkToken = typeof magicLinkTokens.$inferSelect;
 export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
 export type NewWaitlistSignup = typeof waitlistSignups.$inferInsert;
