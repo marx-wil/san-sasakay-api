@@ -6,6 +6,18 @@ import { db } from "../db/client.js";
 import { CROWD_LEVEL, REPORT_STATUS, identityProofs, reports, users } from "../db/schema.js";
 import { BadRequest, Forbidden } from "../lib/errors.js";
 
+// Anonymise user_id to a stable 3-digit passenger token — same pattern
+// as the frontend mock data. The token is deterministic (same user always
+// gets the same 3 digits for a given route session) but does not expose
+// the real user id to other commuters.
+function anonymizeUser(userId: string): string {
+  const hex = userId.replace(/-/g, "").slice(-6);
+  const n = Number.parseInt(hex, 16) % 1000;
+  return n.toString().padStart(3, "0");
+}
+
+const ROUTE_REPORTS_WINDOW_MINUTES = 60;
+
 const SubmitBody = z.object({
   clientUuid: z.string().uuid(),
   routeId: z.string().uuid(),
@@ -107,6 +119,66 @@ export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
       // passes basic anti-spam checks. For MVP, return the *expected* +25.
       reply.code(201);
       return { id: row.id, pointsAwarded: 25, duplicate: false };
+    },
+  );
+
+  // GET /reports/route/:routeId — recent public (anonymised) reports for one route.
+  // No auth required — used by RouteDetailSheet's "MGA ULAT" section.
+  // Returns only reports from the last ROUTE_REPORTS_WINDOW_MINUTES minutes so
+  // stale data doesn't mislead commuters checking a real-time status panel.
+  app.get(
+    "/route/:routeId",
+    {
+      schema: {
+        tags: ["reports"],
+        params: z.object({ routeId: z.string().uuid() }),
+        querystring: z.object({
+          limit: z.coerce.number().int().min(1).max(20).default(10),
+        }),
+        response: {
+          200: z.object({
+            items: z.array(
+              z.object({
+                id: z.string().uuid(),
+                status: z.enum(REPORT_STATUS),
+                crowdLevel: z.enum(CROWD_LEVEL).nullable(),
+                minutesAgo: z.number().int(),
+                passengerId: z.string(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    async (req) => {
+      const { routeId } = req.params;
+      const { limit } = req.query;
+
+      const result = await db.execute<{
+        id: string;
+        user_id: string;
+        status: (typeof REPORT_STATUS)[number];
+        crowd_level: (typeof CROWD_LEVEL)[number] | null;
+        created_at: string;
+      }>(sql`
+        SELECT r.id, r.user_id, r.status, r.crowd_level, r.created_at
+        FROM reports r
+        WHERE r.route_id = ${routeId}::uuid
+          AND r.created_at >= NOW() - INTERVAL '${sql.raw(String(ROUTE_REPORTS_WINDOW_MINUTES))} minutes'
+        ORDER BY r.created_at DESC
+        LIMIT ${limit}
+      `);
+
+      const nowMs = Date.now();
+      return {
+        items: result.rows.map((r) => ({
+          id: r.id,
+          status: r.status,
+          crowdLevel: r.crowd_level,
+          minutesAgo: Math.round((nowMs - new Date(r.created_at).getTime()) / 60_000),
+          passengerId: anonymizeUser(r.user_id),
+        })),
+      };
     },
   );
 
