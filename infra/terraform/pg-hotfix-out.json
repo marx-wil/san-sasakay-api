@@ -1,22 +1,22 @@
 ﻿{
-    "CommandId": "7235e3f7-3c7c-4a0b-96c3-d5f0df96e42a",
-    "InstanceId": "i-097662e60f8470de1",
-    "Comment": "",
-    "DocumentName": "AWS-RunShellScript",
-    "DocumentVersion": "$DEFAULT",
-    "PluginName": "aws:runShellScript",
-    "ResponseCode": 0,
-    "ExecutionStartDateTime": "2026-05-01T10:56:49.947Z",
-    "ExecutionElapsedTime": "PT22.545S",
-    "ExecutionEndDateTime": "2026-05-01T10:57:11.947Z",
-    "Status": "Success",
-    "StatusDetails": "Success",
-    "StandardOutputContent": "=== stopping stack ===\n=== removing broken postgres bind-mount data ===\n=== rewriting docker-compose.yml with named volume and longer healthcheck ===\n=== bringing postgres + caddy back up ===\n=== waiting for postgres health (up to 150s) ===\n  [1] starting\n  [2] starting\n  [3] healthy\n=== starting api + worker ===\n=== final state ===\nNAME               IMAGE                               COMMAND                  SERVICE    CREATED          STATUS                    PORTS\nsakay-api-1        ghcr.io/marx-wil/sakay-api:latest   \"/usr/bin/tini -- noà\"   api        1 second ago     Up Less than a second     3000/tcp\nsakay-caddy-1      caddy:2.8-alpine                    \"caddy run --config à\"   caddy      12 seconds ago   Up 11 seconds             0.0.0.0:80->80/tcp, :::80->80/tcp, 0.0.0.0:443->443/tcp, :::443->443/tcp, 0.0.0.0:443->443/udp, :::443->443/udp, 2019/tcp\nsakay-postgres-1   timescale/timescaledb-ha:pg16       \"/docker-entrypoint.à\"   postgres   12 seconds ago   Up 11 seconds (healthy)   5432/tcp, 8008/tcp, 8081/tcp\nsakay-worker-1     ghcr.io/marx-wil/sakay-api:latest   \"/usr/bin/tini -- noà\"   worker     1 second ago     Up Less than a second     3000/tcp\n",
-    "StandardOutputUrl": "",
-    "StandardErrorContent": " Container sakay-worker-1  Stopping\n Container sakay-worker-1  Stopped\n Container sakay-worker-1  Removing\n Container sakay-caddy-1  Stopping\n Container sakay-api-1  Stopping\n Container sakay-api-1  Stopped\n Container sakay-api-1  Removing\n Container sakay-api-1  Removed\n Container sakay-worker-1  Removed\n Container sakay-postgres-1  Stopping\n Container sakay-caddy-1  Stopped\n Container sakay-caddy-1  Removing\n Container sakay-caddy-1  Removed\n Container sakay-postgres-1  Stopped\n Container sakay-postgres-1  Removing\n Container sakay-postgres-1  Removed\n Network sakay_sakaynet  Removing\n Network sakay_sakaynet  Removed\n Network sakay_sakaynet  Creating\n Network sakay_sakaynet  Created\n Volume \"sakay_postgres_data\"  Creating\n Volume \"sakay_postgres_data\"  Created\n Container sakay-postgres-1  Creating\n Container sakay-caddy-1  Creating\n Container sakay-caddy-1  Created\n Container sakay-postgres-1  Created\n Container sakay-postgres-1  Starting\n Container sakay-caddy-1  Starting\n Container sakay-postgres-1  Started\n Container sakay-caddy-1  Started\n Container sakay-postgres-1  Running\n Container sakay-api-1  Creating\n Container sakay-worker-1  Creating\n Container sakay-caddy-1  Running\n Container sakay-worker-1  Created\n Container sakay-api-1  Created\n Container sakay-postgres-1  Waiting\n Container sakay-postgres-1  Waiting\n Container sakay-postgres-1  Healthy\n Container sakay-api-1  Starting\n Container sakay-postgres-1  Healthy\n Container sakay-worker-1  Starting\n Container sakay-api-1  Started\n Container sakay-worker-1  Started\n",
-    "StandardErrorUrl": "",
-    "CloudWatchOutputConfig": {
-        "CloudWatchLogGroupName": "",
-        "CloudWatchOutputEnabled": false
-    }
+  "CommandId": "7235e3f7-3c7c-4a0b-96c3-d5f0df96e42a",
+  "InstanceId": "i-097662e60f8470de1",
+  "Comment": "",
+  "DocumentName": "AWS-RunShellScript",
+  "DocumentVersion": "$DEFAULT",
+  "PluginName": "aws:runShellScript",
+  "ResponseCode": 0,
+  "ExecutionStartDateTime": "2026-05-01T10:56:49.947Z",
+  "ExecutionElapsedTime": "PT22.545S",
+  "ExecutionEndDateTime": "2026-05-01T10:57:11.947Z",
+  "Status": "Success",
+  "StatusDetails": "Success",
+  "StandardOutputContent": "=== stopping stack ===\n=== removing broken postgres bind-mount data ===\n=== rewriting docker-compose.yml with named volume and longer healthcheck ===\n=== bringing postgres + caddy back up ===\n=== waiting for postgres health (up to 150s) ===\n  [1] starting\n  [2] starting\n  [3] healthy\n=== starting api + worker ===\n=== final state ===\nNAME               IMAGE                               COMMAND                  SERVICE    CREATED          STATUS                    PORTS\nsakay-api-1        ghcr.io/marx-wil/sakay-api:latest   \"/usr/bin/tini -- noà\"   api        1 second ago     Up Less than a second     3000/tcp\nsakay-caddy-1      caddy:2.8-alpine                    \"caddy run --config à\"   caddy      12 seconds ago   Up 11 seconds             0.0.0.0:80->80/tcp, :::80->80/tcp, 0.0.0.0:443->443/tcp, :::443->443/tcp, 0.0.0.0:443->443/udp, :::443->443/udp, 2019/tcp\nsakay-postgres-1   timescale/timescaledb-ha:pg16       \"/docker-entrypoint.à\"   postgres   12 seconds ago   Up 11 seconds (healthy)   5432/tcp, 8008/tcp, 8081/tcp\nsakay-worker-1     ghcr.io/marx-wil/sakay-api:latest   \"/usr/bin/tini -- noà\"   worker     1 second ago     Up Less than a second     3000/tcp\n",
+  "StandardOutputUrl": "",
+  "StandardErrorContent": " Container sakay-worker-1  Stopping\n Container sakay-worker-1  Stopped\n Container sakay-worker-1  Removing\n Container sakay-caddy-1  Stopping\n Container sakay-api-1  Stopping\n Container sakay-api-1  Stopped\n Container sakay-api-1  Removing\n Container sakay-api-1  Removed\n Container sakay-worker-1  Removed\n Container sakay-postgres-1  Stopping\n Container sakay-caddy-1  Stopped\n Container sakay-caddy-1  Removing\n Container sakay-caddy-1  Removed\n Container sakay-postgres-1  Stopped\n Container sakay-postgres-1  Removing\n Container sakay-postgres-1  Removed\n Network sakay_sakaynet  Removing\n Network sakay_sakaynet  Removed\n Network sakay_sakaynet  Creating\n Network sakay_sakaynet  Created\n Volume \"sakay_postgres_data\"  Creating\n Volume \"sakay_postgres_data\"  Created\n Container sakay-postgres-1  Creating\n Container sakay-caddy-1  Creating\n Container sakay-caddy-1  Created\n Container sakay-postgres-1  Created\n Container sakay-postgres-1  Starting\n Container sakay-caddy-1  Starting\n Container sakay-postgres-1  Started\n Container sakay-caddy-1  Started\n Container sakay-postgres-1  Running\n Container sakay-api-1  Creating\n Container sakay-worker-1  Creating\n Container sakay-caddy-1  Running\n Container sakay-worker-1  Created\n Container sakay-api-1  Created\n Container sakay-postgres-1  Waiting\n Container sakay-postgres-1  Waiting\n Container sakay-postgres-1  Healthy\n Container sakay-api-1  Starting\n Container sakay-postgres-1  Healthy\n Container sakay-worker-1  Starting\n Container sakay-api-1  Started\n Container sakay-worker-1  Started\n",
+  "StandardErrorUrl": "",
+  "CloudWatchOutputConfig": {
+    "CloudWatchLogGroupName": "",
+    "CloudWatchOutputEnabled": false
+  }
 }

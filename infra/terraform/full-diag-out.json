@@ -1,22 +1,22 @@
 ﻿{
-    "CommandId": "39e293f0-7c77-4108-b31e-30852843c972",
-    "InstanceId": "i-097662e60f8470de1",
-    "Comment": "",
-    "DocumentName": "AWS-RunShellScript",
-    "DocumentVersion": "$DEFAULT",
-    "PluginName": "aws:runShellScript",
-    "ResponseCode": 2,
-    "ExecutionStartDateTime": "2026-05-01T10:42:10.215Z",
-    "ExecutionElapsedTime": "PT0.702S",
-    "ExecutionEndDateTime": "2026-05-01T10:42:10.215Z",
-    "Status": "Failed",
-    "StatusDetails": "Failed",
-    "StandardOutputContent": "=== CLOUD-INIT STATUS ===\nstatus: done\ntime: Fri, 01 May 2026 10:27:30 +0000\ndetail:\nDataSourceEc2\n=== /opt/sakay CONTENTS ===\ntotal 12\ndrwxr-xr-x. 5 root root  120 May  1 10:24 .\ndrwxr-xr-x. 5 root root   48 May  1 10:24 ..\n-rw-r-----. 1 root root  525 May  1 10:24 .env\n-rw-r--r--. 1 root root  120 May  1 10:24 Caddyfile\ndrwxr-xr-x. 3 root root   19 May  1 10:26 caddy-config\ndrwxr-xr-x. 3 root root   19 May  1 10:26 caddy-data\n-rw-r--r--. 1 root root 1369 May  1 10:24 docker-compose.yml\ndrwxr-xr-x. 2 root root    6 May  1 10:24 postgres-data\n",
-    "StandardOutputUrl": "",
-    "StandardErrorContent": "/var/lib/amazon/ssm/i-097662e60f8470de1/document/orchestration/39e293f0-7c77-4108-b31e-30852843c972/awsrunShellScript/0.awsrunShellScript/_script.sh: line 5: syntax error near unexpected token `('\n/var/lib/amazon/ssm/i-097662e60f8470de1/document/orchestration/39e293f0-7c77-4108-b31e-30852843c972/awsrunShellScript/0.awsrunShellScript/_script.sh: line 5: `echo === COMPOSE FILE (first 40 lines) ==='\nfailed to run commands: exit status 2",
-    "StandardErrorUrl": "",
-    "CloudWatchOutputConfig": {
-        "CloudWatchLogGroupName": "",
-        "CloudWatchOutputEnabled": false
-    }
+  "CommandId": "39e293f0-7c77-4108-b31e-30852843c972",
+  "InstanceId": "i-097662e60f8470de1",
+  "Comment": "",
+  "DocumentName": "AWS-RunShellScript",
+  "DocumentVersion": "$DEFAULT",
+  "PluginName": "aws:runShellScript",
+  "ResponseCode": 2,
+  "ExecutionStartDateTime": "2026-05-01T10:42:10.215Z",
+  "ExecutionElapsedTime": "PT0.702S",
+  "ExecutionEndDateTime": "2026-05-01T10:42:10.215Z",
+  "Status": "Failed",
+  "StatusDetails": "Failed",
+  "StandardOutputContent": "=== CLOUD-INIT STATUS ===\nstatus: done\ntime: Fri, 01 May 2026 10:27:30 +0000\ndetail:\nDataSourceEc2\n=== /opt/sakay CONTENTS ===\ntotal 12\ndrwxr-xr-x. 5 root root  120 May  1 10:24 .\ndrwxr-xr-x. 5 root root   48 May  1 10:24 ..\n-rw-r-----. 1 root root  525 May  1 10:24 .env\n-rw-r--r--. 1 root root  120 May  1 10:24 Caddyfile\ndrwxr-xr-x. 3 root root   19 May  1 10:26 caddy-config\ndrwxr-xr-x. 3 root root   19 May  1 10:26 caddy-data\n-rw-r--r--. 1 root root 1369 May  1 10:24 docker-compose.yml\ndrwxr-xr-x. 2 root root    6 May  1 10:24 postgres-data\n",
+  "StandardOutputUrl": "",
+  "StandardErrorContent": "/var/lib/amazon/ssm/i-097662e60f8470de1/document/orchestration/39e293f0-7c77-4108-b31e-30852843c972/awsrunShellScript/0.awsrunShellScript/_script.sh: line 5: syntax error near unexpected token `('\n/var/lib/amazon/ssm/i-097662e60f8470de1/document/orchestration/39e293f0-7c77-4108-b31e-30852843c972/awsrunShellScript/0.awsrunShellScript/_script.sh: line 5: `echo === COMPOSE FILE (first 40 lines) ==='\nfailed to run commands: exit status 2",
+  "StandardErrorUrl": "",
+  "CloudWatchOutputConfig": {
+    "CloudWatchLogGroupName": "",
+    "CloudWatchOutputEnabled": false
+  }
 }

@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS "reports" (
 	"route_id" uuid NOT NULL,
 	"status" text NOT NULL,
 	"crowd_level" text,
-	"location" "geography(Point,4326)" NOT NULL,
+	"location" geography(Point,4326) NOT NULL,
 	"weight" real DEFAULT 1 NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "reports_id_created_at_pk" PRIMARY KEY("id","created_at"),
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS "stops" (
 	"route_id" uuid NOT NULL,
 	"seq" integer NOT NULL,
 	"name" text NOT NULL,
-	"location" "geography(Point,4326)" NOT NULL,
+	"location" geography(Point,4326) NOT NULL,
 	CONSTRAINT "stops_route_seq_uq" UNIQUE("route_id","seq")
 );
 --> statement-breakpoint
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS "transit_routes" (
 	"code" text NOT NULL,
 	"name" text NOT NULL,
 	"type" text NOT NULL,
-	"geometry" "geography(LineString,4326)",
+	"geometry" geography(LineString,4326),
 	"is_active" integer DEFAULT 1 NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "transit_routes_code_uq" UNIQUE("code")

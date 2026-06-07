@@ -5,10 +5,10 @@ import { makeRequireAuth } from "../auth/jwt.js";
 import { hashIdentifier, normalizePhPhone } from "../auth/magic-link.js";
 import { db } from "../db/client.js";
 import {
-  identityProofs,
-  pointsEvents,
   ROUTE_STATUS,
   TRANSIT_TYPE,
+  identityProofs,
+  pointsEvents,
   userSavedRoutes,
   users,
 } from "../db/schema.js";
