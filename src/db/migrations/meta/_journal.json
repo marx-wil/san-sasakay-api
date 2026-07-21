@@ -8,13 +8,6 @@
       "when": 1779264480836,
       "tag": "0000_past_prism",
       "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1784596734964,
-      "tag": "0001_secret_ironclad",
-      "breakpoints": true
     }
   ]
 }
