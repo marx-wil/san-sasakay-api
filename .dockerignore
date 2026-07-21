@@ -9,7 +9,10 @@ infra
 *.md
 .postgres-data
 .mailpit-data
-# data/ is regenerated at build time by `npm run osm:fetch`. Excluding it
-# from the build context guarantees a deterministic fetch (a dev's stale
-# local cache can't sneak into the image) and keeps the upload small.
-data
+# Dev caches under data/ stay out of the build context, but the CI
+# pre-fetched OSM bundle must be included so the in-Docker osm:fetch
+# cache-fresh check skips the Overpass call.
+data/*
+!data/osm-routes/
+data/osm-routes/*
+!data/osm-routes/*.geojson
