@@ -48,6 +48,15 @@ export type ReportStatus = (typeof REPORT_STATUS)[number];
 export const CROWD_LEVEL = ["maluwag", "katamtaman", "siksikan"] as const;
 export type CrowdLevel = (typeof CROWD_LEVEL)[number];
 
+export const TRIP_ISSUE = ["aksidente", "baha", "sarado", "others"] as const;
+export type TripIssue = (typeof TRIP_ISSUE)[number];
+
+export const TRIP_SPEED = ["mabilis", "sakto", "matagal"] as const;
+export type TripSpeed = (typeof TRIP_SPEED)[number];
+
+export const PASSENGER_LEVEL = ["kaunti", "sakto", "puno", "tayuan"] as const;
+export type PassengerLevel = (typeof PASSENGER_LEVEL)[number];
+
 export const ROUTE_STATUS = ["tumatakbo", "limitado", "hindi_tumatakbo", "hindi_alam"] as const;
 export type RouteStatus = (typeof ROUTE_STATUS)[number];
 
@@ -207,6 +216,35 @@ export const reports = pgTable(
   }),
 );
 
+// ─── trip_feedback ──────────────────────────────────────────────────────────
+// Post-trip survey from the journey drawer completion flow.
+export const tripFeedback = pgTable(
+  "trip_feedback",
+  {
+    id: uuid("id").defaultRandom(),
+    clientUuid: uuid("client_uuid").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    routeId: uuid("route_id")
+      .notNull()
+      .references(() => transitRoutes.id, { onDelete: "cascade" }),
+    tripIssue: text("trip_issue").notNull().$type<TripIssue>(),
+    othersText: text("others_text"),
+    tripSpeed: text("trip_speed").notNull().$type<TripSpeed>(),
+    passengerLevel: text("passenger_level").notNull().$type<PassengerLevel>(),
+    location: geographyPoint("location").notNull(),
+    weight: real("weight").notNull().default(1.0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.id, t.createdAt] }),
+    clientUq: unique("trip_feedback_user_client_uq").on(t.userId, t.clientUuid),
+    routeTimeIdx: index("trip_feedback_route_time_idx").on(t.routeId, t.createdAt),
+    createdAtIdx: index("trip_feedback_created_at_idx").on(t.createdAt),
+  }),
+);
+
 // ─── route_status ───────────────────────────────────────────────────────────
 // Denormalized current state per route. Aggregator worker upserts this every tick.
 export const routeStatus = pgTable("route_status", {
@@ -296,6 +334,8 @@ export type TransitRoute = typeof transitRoutes.$inferSelect;
 export type Stop = typeof stops.$inferSelect;
 export type Report = typeof reports.$inferSelect;
 export type NewReport = typeof reports.$inferInsert;
+export type TripFeedbackRow = typeof tripFeedback.$inferSelect;
+export type NewTripFeedback = typeof tripFeedback.$inferInsert;
 export type RouteStatusRow = typeof routeStatus.$inferSelect;
 export type PointsEvent = typeof pointsEvents.$inferSelect;
 export type UserSavedRoute = typeof userSavedRoutes.$inferSelect;

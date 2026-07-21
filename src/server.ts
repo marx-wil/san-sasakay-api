@@ -19,6 +19,7 @@ import { placesRoutes } from "./places/routes.js";
 import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
 import { reportRoutes } from "./routes/reports.js";
+import { tripFeedbackRoutes } from "./routes/trip-feedback.js";
 import { transitRouteRoutes } from "./routes/transit-routes.js";
 import { waitlistRoutes } from "./routes/waitlist.js";
 import { wsRoutes } from "./routes/ws.js";
@@ -96,6 +97,7 @@ async function buildServer() {
   await app.register(authRoutes, { prefix: "/auth" });
   await app.register(meRoutes, { prefix: "/me" });
   await app.register(reportRoutes, { prefix: "/reports" });
+  await app.register(tripFeedbackRoutes, { prefix: "/trip-feedback" });
   await app.register(transitRouteRoutes, { prefix: "/routes" });
   await app.register(placesRoutes, { prefix: "/places" });
   await app.register(waitlistRoutes, { prefix: "/waitlist" });
