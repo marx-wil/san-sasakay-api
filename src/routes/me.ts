@@ -6,6 +6,7 @@ import { hashIdentifier, normalizePhPhone } from "../auth/magic-link.js";
 import { db } from "../db/client.js";
 import {
   ROUTE_STATUS,
+  PASSENGER_LEVEL,
   TRANSIT_TYPE,
   identityProofs,
   pointsEvents,
@@ -241,6 +242,7 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
     confidence: z.number(),
     reportCount: z.number().int(),
     lastReportAt: z.string().nullable(),
+    passengerLevel: z.enum(PASSENGER_LEVEL).nullable(),
     savedAt: z.string(),
   });
 
@@ -268,6 +270,7 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
         confidence: number;
         report_count: number;
         last_report_at: string | null;
+        passenger_level: (typeof PASSENGER_LEVEL)[number] | null;
         saved_at: string;
       }>(sql`
         SELECT tr.id, tr.code, tr.name, tr.type,
@@ -275,6 +278,7 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
                COALESCE(rs.confidence, 0)         AS confidence,
                COALESCE(rs.report_count, 0)       AS report_count,
                rs.last_report_at,
+               rs.passenger_level,
                usr.saved_at
         FROM   user_saved_routes usr
         JOIN   transit_routes tr ON tr.id = usr.route_id
@@ -293,6 +297,7 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
           confidence: r.confidence,
           reportCount: r.report_count,
           lastReportAt: r.last_report_at ? new Date(r.last_report_at).toISOString() : null,
+          passengerLevel: r.passenger_level,
           savedAt: new Date(r.saved_at).toISOString(),
         })),
       };

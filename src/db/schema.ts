@@ -65,6 +65,7 @@ export const PASSENGER_LEVEL = ["kaunti", "sakto", "puno", "tayuan"] as const;
 export type PassengerLevel = (typeof PASSENGER_LEVEL)[number];
 
 export const ROUTE_STATUS = ["tumatakbo", "limitado", "hindi_tumatakbo", "hindi_alam"] as const;
+/** Wire enum. App displays: tumatakbo→Mabilis, limitado→Sakto lang, hindi_tumatakbo→Matagal, hindi_alam→Hindi alam. */
 export type RouteStatus = (typeof ROUTE_STATUS)[number];
 
 export const TRANSIT_TYPE = ["jeepney", "uv_express", "p2p_bus", "tricycle", "ferry"] as const;
@@ -264,6 +265,8 @@ export const routeStatus = pgTable("route_status", {
   reportCount: integer("report_count").notNull().default(0),
   // Last contributing report time — used to render "last 20 min" trust signal.
   lastReportAt: timestamp("last_report_at", { withTimezone: true }),
+  /** Weighted majority from trip_feedback.passenger_level in the report window. */
+  passengerLevel: text("passenger_level").$type<PassengerLevel>(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

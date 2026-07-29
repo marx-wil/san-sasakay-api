@@ -13,6 +13,8 @@ import { logger } from "../lib/logger.js";
  *   - report_count  : count of contributing reports
  *   - last_report_at
  *
+ * Also rolls up passenger_level from trip_feedback in the same window.
+ *
  * Reports decay linearly from REPORT_DECAY_START_MINUTES to REPORT_EXPIRY_MINUTES,
  * weighted by user credibility at submission time (snapshotted in reports.weight).
  *
@@ -105,6 +107,71 @@ export async function runAggregatorOnce(): Promise<{ touchedRoutes: number }> {
       AND (last_report_at IS NULL OR last_report_at < NOW() - INTERVAL '${sql.raw(
         String(expiry),
       )} minutes')
+  `);
+
+  // Aggregate passenger_level from trip_feedback in the same window.
+  await db.execute(sql`
+    WITH windowed AS (
+      SELECT
+        tf.route_id,
+        tf.passenger_level,
+        tf.weight,
+        tf.created_at,
+        EXTRACT(EPOCH FROM (NOW() - tf.created_at)) / 60.0 AS age_min
+      FROM trip_feedback tf
+      WHERE tf.created_at > NOW() - INTERVAL '${sql.raw(String(expiry))} minutes'
+    ),
+    weighted AS (
+      SELECT
+        route_id,
+        passenger_level,
+        weight * GREATEST(
+          0,
+          CASE
+            WHEN age_min <= ${decayStart} THEN 1.0
+            ELSE 1.0 - ((age_min - ${decayStart}) / NULLIF(${expiry - decayStart}, 0))
+          END
+        ) AS w
+      FROM windowed
+    ),
+    per_level AS (
+      SELECT route_id, passenger_level, SUM(w) AS sw
+      FROM weighted
+      WHERE w > 0
+      GROUP BY route_id, passenger_level
+    ),
+    ranked AS (
+      SELECT
+        route_id,
+        passenger_level,
+        ROW_NUMBER() OVER (PARTITION BY route_id ORDER BY sw DESC) AS rn
+      FROM per_level
+    ),
+    winners AS (
+      SELECT route_id, passenger_level
+      FROM ranked
+      WHERE rn = 1
+    )
+    INSERT INTO route_status (route_id, status, confidence, report_count, passenger_level, updated_at)
+    SELECT w.route_id, 'hindi_alam', 0, 0, w.passenger_level, NOW()
+    FROM winners w
+    ON CONFLICT (route_id) DO UPDATE
+      SET passenger_level = EXCLUDED.passenger_level,
+          updated_at      = NOW()
+  `);
+
+  // Clear passenger_level when no recent trip feedback exists.
+  await db.execute(sql`
+    UPDATE route_status rs
+    SET passenger_level = NULL,
+        updated_at = NOW()
+    WHERE rs.passenger_level IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM trip_feedback tf
+        WHERE tf.route_id = rs.route_id
+          AND tf.created_at > NOW() - INTERVAL '${sql.raw(String(expiry))} minutes'
+      )
   `);
 
   return { touchedRoutes: result.rows.length };

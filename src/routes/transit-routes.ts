@@ -2,7 +2,7 @@ import { type SQL, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { db } from "../db/client.js";
-import { ROUTE_STATUS, TRANSIT_TYPE } from "../db/schema.js";
+import { ROUTE_STATUS, TRANSIT_TYPE, PASSENGER_LEVEL } from "../db/schema.js";
 import { NotFound } from "../lib/errors.js";
 import { LATLNG_RE, parseLatLng } from "../lib/latlng.js";
 
@@ -15,6 +15,7 @@ const RouteSummary = z.object({
   confidence: z.number(),
   reportCount: z.number().int(),
   lastReportAt: z.string().nullable(),
+  passengerLevel: z.enum(PASSENGER_LEVEL).nullable(),
   // Present only when the request asked for `?include=geometry`. GeoJSON
   // LineString, simplified server-side to keep the list payload light
   // for map overlays. Use GET /routes/:id for full-fidelity geometry.
@@ -192,13 +193,15 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
         confidence: number;
         report_count: number;
         last_report_at: string | null;
+        passenger_level: (typeof PASSENGER_LEVEL)[number] | null;
       }>(sql`
         SELECT tr.id, tr.code, tr.name, tr.type,
                ${geomFragment}
                COALESCE(rs.status, 'hindi_alam') AS status,
                COALESCE(rs.confidence, 0)        AS confidence,
                COALESCE(rs.report_count, 0)      AS report_count,
-               rs.last_report_at
+               rs.last_report_at,
+               rs.passenger_level
         FROM transit_routes tr
         LEFT JOIN route_status rs ON rs.route_id = tr.id
         WHERE ${whereClause}
@@ -216,6 +219,7 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
           confidence: r.confidence,
           reportCount: r.report_count,
           lastReportAt: r.last_report_at ? new Date(r.last_report_at).toISOString() : null,
+          passengerLevel: r.passenger_level,
           ...(includeGeom ? { geometry: r.geometry ? JSON.parse(r.geometry) : null } : {}),
         })),
       };
@@ -245,13 +249,15 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
         confidence: number;
         report_count: number;
         last_report_at: string | null;
+        passenger_level: (typeof PASSENGER_LEVEL)[number] | null;
       }>(sql`
         SELECT tr.id, tr.code, tr.name, tr.type,
                ST_AsGeoJSON(tr.geometry) AS geometry,
                COALESCE(rs.status, 'hindi_alam') AS status,
                COALESCE(rs.confidence, 0)        AS confidence,
                COALESCE(rs.report_count, 0)      AS report_count,
-               rs.last_report_at
+               rs.last_report_at,
+               rs.passenger_level
         FROM transit_routes tr
         LEFT JOIN route_status rs ON rs.route_id = tr.id
         WHERE tr.id = ${id}::uuid
@@ -285,6 +291,7 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
         confidence: row.confidence,
         reportCount: row.report_count,
         lastReportAt: row.last_report_at ? new Date(row.last_report_at).toISOString() : null,
+        passengerLevel: row.passenger_level,
         geometry: row.geometry ? JSON.parse(row.geometry) : null,
         stops: stopsRes.rows.map((s) => ({
           id: s.id,

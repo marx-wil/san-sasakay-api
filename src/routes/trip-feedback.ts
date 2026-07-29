@@ -61,6 +61,15 @@ function passengerToCrowd(
   return "siksikan";
 }
 
+/** Map trip-speed → route_status wire values (display: Mabilis / Sakto lang / Matagal). */
+function speedToRouteStatus(
+  speed: (typeof TRIP_SPEED)[number],
+): "tumatakbo" | "limitado" | "hindi_tumatakbo" {
+  if (speed === "mabilis") return "tumatakbo";
+  if (speed === "sakto") return "limitado";
+  return "hindi_tumatakbo";
+}
+
 /** Deterministic UUID v4-shaped id for idempotent incident report side-effects. */
 function derivedClientUuid(base: string, suffix: string): string {
   const hash = createHash("sha256").update(`${base}:${suffix}`).digest("hex");
@@ -140,23 +149,26 @@ export const tripFeedbackRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const negativeIssues = new Set(["aksidente", "baha", "sarado"]);
-      if (negativeIssues.has(body.tripIssue)) {
-        const reportClientUuid = derivedClientUuid(body.clientUuid, "incident");
-        await db.execute(sql`
-          INSERT INTO reports (
-            client_uuid, user_id, route_id, status, crowd_level, location, weight
-          ) VALUES (
-            ${reportClientUuid}::uuid,
-            ${userId}::uuid,
-            ${body.routeId}::uuid,
-            'hindi_tumatakbo',
-            ${passengerToCrowd(body.passengerLevel)},
-            ${`SRID=4326;POINT(${body.location.lng} ${body.location.lat})`}::geography,
-            ${weight}
-          )
-          ON CONFLICT (user_id, client_uuid) DO NOTHING
-        `);
-      }
+      // Every trip feedback contributes to aggregated route status via reports.
+      // Incidents force Matagal (hindi_tumatakbo); otherwise use trip_speed.
+      const reportStatus = negativeIssues.has(body.tripIssue)
+        ? "hindi_tumatakbo"
+        : speedToRouteStatus(body.tripSpeed);
+      const reportClientUuid = derivedClientUuid(body.clientUuid, "status");
+      await db.execute(sql`
+        INSERT INTO reports (
+          client_uuid, user_id, route_id, status, crowd_level, location, weight
+        ) VALUES (
+          ${reportClientUuid}::uuid,
+          ${userId}::uuid,
+          ${body.routeId}::uuid,
+          ${reportStatus},
+          ${passengerToCrowd(body.passengerLevel)},
+          ${`SRID=4326;POINT(${body.location.lng} ${body.location.lat})`}::geography,
+          ${weight}
+        )
+        ON CONFLICT (user_id, client_uuid) DO NOTHING
+      `);
 
       reply.code(201);
       return { id: row.id, pointsAwarded: 25, duplicate: false };
