@@ -48,7 +48,14 @@ export type ReportStatus = (typeof REPORT_STATUS)[number];
 export const CROWD_LEVEL = ["maluwag", "katamtaman", "siksikan"] as const;
 export type CrowdLevel = (typeof CROWD_LEVEL)[number];
 
-export const TRIP_ISSUE = ["aksidente", "baha", "sarado", "others"] as const;
+export const TRIP_ISSUE = [
+  "tuloy_tuloy",
+  "okay_lang",
+  "aksidente",
+  "baha",
+  "sarado",
+  "others",
+] as const;
 export type TripIssue = (typeof TRIP_ISSUE)[number];
 
 export const TRIP_SPEED = ["mabilis", "sakto", "matagal"] as const;

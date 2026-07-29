@@ -139,7 +139,8 @@ export const tripFeedbackRoutes: FastifyPluginAsyncZod = async (app) => {
         return { id: priorId, pointsAwarded: 0, duplicate: true };
       }
 
-      if (body.tripIssue !== "others") {
+      const negativeIssues = new Set(["aksidente", "baha", "sarado"]);
+      if (negativeIssues.has(body.tripIssue)) {
         const reportClientUuid = derivedClientUuid(body.clientUuid, "incident");
         await db.execute(sql`
           INSERT INTO reports (
