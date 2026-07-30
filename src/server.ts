@@ -16,6 +16,7 @@ import { migrate } from "./db/migrate.js";
 import { AppError } from "./lib/errors.js";
 import { logger } from "./lib/logger.js";
 import { placesRoutes } from "./places/routes.js";
+import { accountDeletionRoutes } from "./routes/account-deletion.js";
 import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
 import { reportRoutes } from "./routes/reports.js";
@@ -96,6 +97,7 @@ async function buildServer() {
   await app.register(healthRoutes);
   await app.register(authRoutes, { prefix: "/auth" });
   await app.register(meRoutes, { prefix: "/me" });
+  await app.register(accountDeletionRoutes, { prefix: "/account-deletion" });
   await app.register(reportRoutes, { prefix: "/reports" });
   await app.register(tripFeedbackRoutes, { prefix: "/trip-feedback" });
   await app.register(transitRouteRoutes, { prefix: "/routes" });

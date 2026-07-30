@@ -156,6 +156,26 @@ export const magicLinkTokens = pgTable(
   }),
 );
 
+// ─── account_deletion_tokens ────────────────────────────────────────────────
+// One-time tokens for the public web account-deletion confirm link.
+// Hash the token at rest (same pattern as magic_link_tokens).
+export const accountDeletionTokens = pgTable(
+  "account_deletion_tokens",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    expiresIdx: index("account_deletion_tokens_expires_idx").on(t.expiresAt),
+    userIdx: index("account_deletion_tokens_user_idx").on(t.userId),
+  }),
+);
+
 // ─── transit_routes ─────────────────────────────────────────────────────────
 export const transitRoutes = pgTable(
   "transit_routes",
@@ -350,6 +370,7 @@ export type RouteStatusRow = typeof routeStatus.$inferSelect;
 export type PointsEvent = typeof pointsEvents.$inferSelect;
 export type UserSavedRoute = typeof userSavedRoutes.$inferSelect;
 export type MagicLinkToken = typeof magicLinkTokens.$inferSelect;
+export type AccountDeletionToken = typeof accountDeletionTokens.$inferSelect;
 export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
 export type NewWaitlistSignup = typeof waitlistSignups.$inferInsert;
 

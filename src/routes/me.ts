@@ -10,9 +10,9 @@ import {
   TRANSIT_TYPE,
   identityProofs,
   pointsEvents,
-  userSavedRoutes,
   users,
 } from "../db/schema.js";
+import { deleteUserAccount } from "../lib/delete-user.js";
 import { BadRequest, Conflict, NotFound } from "../lib/errors.js";
 
 // Anti-farming gate for redemption. Both thresholds must be met before any
@@ -228,6 +228,30 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
         .where(and(eq(identityProofs.userId, userId), eq(identityProofs.provider, "phone")));
 
       return loadProfile(userId);
+    },
+  );
+
+  // DELETE /me — permanently delete the authenticated account and all
+  // personal data (reports, points, identity proofs, saved routes, etc.).
+  // Irreversible. Client must clear the JWT after a successful response.
+  app.delete(
+    "/",
+    {
+      preHandler: [requireAuth],
+      schema: {
+        tags: ["me"],
+        response: { 200: z.object({ ok: z.literal(true) }) },
+      },
+      config: {
+        rateLimit: { max: 5, timeWindow: "1 hour" },
+      },
+    },
+    async (req) => {
+      const userId = req.currentUser?.id;
+      if (!userId) throw NotFound("USER_NOT_FOUND", "User not found");
+
+      await deleteUserAccount(userId);
+      return { ok: true as const };
     },
   );
 
