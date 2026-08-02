@@ -334,6 +334,30 @@ export const userSavedRoutes = pgTable(
   }),
 );
 
+// ─── trip_sessions ──────────────────────────────────────────────────────────
+// Completed journeys for monthly stats (trips taken, commute hours).
+export const tripSessions = pgTable(
+  "trip_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    routeId: uuid("route_id")
+      .notNull()
+      .references(() => transitRoutes.id, { onDelete: "cascade" }),
+    clientTripId: uuid("client_trip_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }).notNull(),
+    durationSeconds: integer("duration_seconds").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    clientUq: unique("trip_sessions_user_client_uq").on(t.userId, t.clientTripId),
+    userTimeIdx: index("trip_sessions_user_time_idx").on(t.userId, t.endedAt),
+  }),
+);
+
 // ─── points_events ──────────────────────────────────────────────────────────
 // Append-only ledger. Balance = SUM(delta) WHERE user_id = ?.
 // Materialized view + Redis cache come later when this becomes hot.
@@ -366,6 +390,8 @@ export type Report = typeof reports.$inferSelect;
 export type NewReport = typeof reports.$inferInsert;
 export type TripFeedbackRow = typeof tripFeedback.$inferSelect;
 export type NewTripFeedback = typeof tripFeedback.$inferInsert;
+export type TripSession = typeof tripSessions.$inferSelect;
+export type NewTripSession = typeof tripSessions.$inferInsert;
 export type RouteStatusRow = typeof routeStatus.$inferSelect;
 export type PointsEvent = typeof pointsEvents.$inferSelect;
 export type UserSavedRoute = typeof userSavedRoutes.$inferSelect;

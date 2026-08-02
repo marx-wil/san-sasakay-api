@@ -2,7 +2,7 @@
  * Hard-delete a user account and associated personal data.
  *
  * Deleting the `users` row cascades to identity_proofs, reports,
- * trip_feedback, user_saved_routes, points_events, and
+ * trip_feedback, trip_sessions, user_saved_routes, points_events, and
  * account_deletion_tokens. magic_link_tokens.user_id is set null.
  *
  * Waitlist rows are keyed by email hash (not user_id), so we also

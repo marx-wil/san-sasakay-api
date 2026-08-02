@@ -378,6 +378,151 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
       return { ok: true as const };
     },
   );
+
+  // ─── Trip sessions & monthly stats ───────────────────────────────────────
+
+  const MAX_TRIP_DURATION_SECONDS = 86_400; // 24 hours
+
+  const TripSessionBody = z.object({
+    clientTripId: z.string().uuid(),
+    routeId: z.string().uuid(),
+    startedAt: z.string().datetime(),
+    endedAt: z.string().datetime(),
+  });
+
+  const TripSessionResponse = z.object({
+    id: z.string().uuid(),
+    durationSeconds: z.number().int(),
+    duplicate: z.boolean(),
+  });
+
+  const MonthlyStatsResponse = z.object({
+    month: z.string().regex(/^\d{4}-\d{2}$/),
+    tripsThisMonth: z.number().int(),
+    commuteSecondsThisMonth: z.number().int(),
+    reportsThisMonth: z.number().int(),
+  });
+
+  // POST /me/trip-sessions — log a journey start or completion. Idempotent
+  // upsert on (user_id, client_trip_id). duration_seconds = 0 means started
+  // but not yet finished; commute stats only sum duration_seconds > 0.
+  app.post(
+    "/trip-sessions",
+    {
+      preHandler: [requireAuth],
+      schema: {
+        tags: ["me"],
+        body: TripSessionBody,
+        response: { 200: TripSessionResponse, 201: TripSessionResponse },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.currentUser?.id;
+      if (!userId) throw NotFound("USER_NOT_FOUND", "User not found");
+
+      const { clientTripId, routeId, startedAt, endedAt } = req.body;
+      const started = new Date(startedAt);
+      const ended = new Date(endedAt);
+      if (Number.isNaN(started.getTime()) || Number.isNaN(ended.getTime())) {
+        throw BadRequest("INVALID_TIMESTAMPS", "startedAt and endedAt must be valid ISO datetimes");
+      }
+
+      const durationSeconds = Math.floor((ended.getTime() - started.getTime()) / 1000);
+      if (durationSeconds < 0) {
+        throw BadRequest("INVALID_DURATION", "endedAt must not be before startedAt");
+      }
+      if (durationSeconds > MAX_TRIP_DURATION_SECONDS) {
+        throw BadRequest("TRIP_TOO_LONG", "Trip duration exceeds 24 hours");
+      }
+
+      const inserted = await db.execute<{ id: string; duration_seconds: number }>(sql`
+        INSERT INTO trip_sessions (
+          user_id, route_id, client_trip_id, started_at, ended_at, duration_seconds
+        ) VALUES (
+          ${userId}::uuid,
+          ${routeId}::uuid,
+          ${clientTripId}::uuid,
+          ${started.toISOString()}::timestamptz,
+          ${ended.toISOString()}::timestamptz,
+          ${durationSeconds}
+        )
+        ON CONFLICT (user_id, client_trip_id) DO UPDATE SET
+          route_id = EXCLUDED.route_id,
+          started_at = EXCLUDED.started_at,
+          ended_at = EXCLUDED.ended_at,
+          duration_seconds = EXCLUDED.duration_seconds
+        RETURNING id, duration_seconds
+      `);
+
+      const row = inserted.rows[0];
+      if (!row) {
+        throw BadRequest("TRIP_SESSION_RACE", "Could not resolve trip session");
+      }
+
+      reply.code(durationSeconds > 0 ? 201 : 200);
+      return {
+        id: row.id,
+        durationSeconds: row.duration_seconds,
+        duplicate: durationSeconds === 0,
+      };
+    },
+  );
+
+  // GET /me/stats — monthly aggregates for home data cards (UTC month).
+  app.get(
+    "/stats",
+    {
+      preHandler: [requireAuth],
+      schema: {
+        tags: ["me"],
+        querystring: z.object({
+          month: z
+            .string()
+            .regex(/^\d{4}-\d{2}$/)
+            .optional(),
+          /** Minutes east of UTC (JS Date.getTimezoneOffset() × -1). */
+          tzOffsetMinutes: z.coerce.number().int().min(-840).max(840).optional(),
+        }),
+        response: { 200: MonthlyStatsResponse },
+      },
+    },
+    async (req) => {
+      const userId = req.currentUser?.id;
+      if (!userId) throw NotFound("USER_NOT_FOUND", "User not found");
+
+      const month = req.query.month ?? currentLocalMonth(req.query.tzOffsetMinutes ?? 0);
+      const { start, end } = localMonthBounds(month, req.query.tzOffsetMinutes ?? 0);
+
+      const statsRow = await db.execute<{
+        trips: number;
+        commute_seconds: number;
+        reports: number;
+      }>(sql`
+        SELECT
+          (SELECT COUNT(*)::int FROM trip_sessions
+           WHERE user_id = ${userId}::uuid
+             AND started_at >= ${start.toISOString()}::timestamptz
+             AND started_at < ${end.toISOString()}::timestamptz) AS trips,
+          (SELECT COALESCE(SUM(duration_seconds), 0)::int FROM trip_sessions
+           WHERE user_id = ${userId}::uuid
+             AND duration_seconds > 0
+             AND ended_at >= ${start.toISOString()}::timestamptz
+             AND ended_at < ${end.toISOString()}::timestamptz) AS commute_seconds,
+          (SELECT COUNT(*)::int FROM trip_feedback
+           WHERE user_id = ${userId}::uuid
+             AND created_at >= ${start.toISOString()}::timestamptz
+             AND created_at < ${end.toISOString()}::timestamptz) AS reports
+      `);
+
+      const row = statsRow.rows[0];
+      return {
+        month,
+        tripsThisMonth: row?.trips ?? 0,
+        commuteSecondsThisMonth: row?.commute_seconds ?? 0,
+        reportsThisMonth: row?.reports ?? 0,
+      };
+    },
+  );
 };
 
 /**
@@ -463,4 +608,38 @@ async function loadProfile(userId: string) {
       minValidatedReports: MIN_VALIDATED_REPORTS,
     },
   };
+}
+
+function currentLocalMonth(tzOffsetMinutes: number): string {
+  const now = new Date();
+  const localMs = now.getTime() + tzOffsetMinutes * 60_000;
+  const local = new Date(localMs);
+  const y = local.getUTCFullYear();
+  const m = String(local.getUTCMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+/** Parse YYYY-MM and return [start, end) bounds in UTC for a fixed offset. */
+function localMonthBounds(
+  month: string,
+  tzOffsetMinutes: number,
+): { start: Date; end: Date } {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) throw BadRequest("INVALID_MONTH", "month must be YYYY-MM");
+  const year = Number(match[1]);
+  const mon = Number(match[2]);
+  if (mon < 1 || mon > 12) throw BadRequest("INVALID_MONTH", "month must be YYYY-MM");
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const abs = Math.abs(tzOffsetMinutes);
+  const sign = tzOffsetMinutes >= 0 ? "+" : "-";
+  const hh = pad(Math.floor(abs / 60));
+  const mm = pad(abs % 60);
+  const tz = `${sign}${hh}:${mm}`;
+
+  const start = new Date(`${year}-${pad(mon)}-01T00:00:00${tz}`);
+  const endYear = mon === 12 ? year + 1 : year;
+  const endMon = mon === 12 ? 1 : mon + 1;
+  const end = new Date(`${endYear}-${pad(endMon)}-01T00:00:00${tz}`);
+  return { start, end };
 }
