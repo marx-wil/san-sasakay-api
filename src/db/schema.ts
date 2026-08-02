@@ -336,6 +336,9 @@ export const userSavedRoutes = pgTable(
 
 // ─── trip_sessions ──────────────────────────────────────────────────────────
 // Completed journeys for monthly stats (trips taken, commute hours).
+export const TRIP_SESSION_STATUS = ["active", "completed", "cancelled"] as const;
+export type TripSessionStatus = (typeof TRIP_SESSION_STATUS)[number];
+
 export const tripSessions = pgTable(
   "trip_sessions",
   {
@@ -350,6 +353,7 @@ export const tripSessions = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
     endedAt: timestamp("ended_at", { withTimezone: true }).notNull(),
     durationSeconds: integer("duration_seconds").notNull(),
+    status: text("status").notNull().$type<TripSessionStatus>().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

@@ -437,20 +437,26 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const inserted = await db.execute<{ id: string; duration_seconds: number }>(sql`
         INSERT INTO trip_sessions (
-          user_id, route_id, client_trip_id, started_at, ended_at, duration_seconds
+          user_id, route_id, client_trip_id, started_at, ended_at, duration_seconds, status
         ) VALUES (
           ${userId}::uuid,
           ${routeId}::uuid,
           ${clientTripId}::uuid,
           ${started.toISOString()}::timestamptz,
           ${ended.toISOString()}::timestamptz,
-          ${durationSeconds}
+          ${durationSeconds},
+          ${durationSeconds > 0 ? "completed" : "active"}
         )
         ON CONFLICT (user_id, client_trip_id) DO UPDATE SET
           route_id = EXCLUDED.route_id,
           started_at = EXCLUDED.started_at,
           ended_at = EXCLUDED.ended_at,
-          duration_seconds = EXCLUDED.duration_seconds
+          duration_seconds = EXCLUDED.duration_seconds,
+          status = CASE
+            WHEN trip_sessions.status = 'cancelled' THEN trip_sessions.status
+            WHEN EXCLUDED.duration_seconds > 0 THEN 'completed'
+            ELSE 'active'
+          END
         RETURNING id, duration_seconds
       `);
 
@@ -465,6 +471,161 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
         durationSeconds: row.duration_seconds,
         duplicate: durationSeconds === 0,
       };
+    },
+  );
+
+  const TripSessionListItem = z.object({
+    id: z.string().uuid(),
+    clientTripId: z.string().uuid(),
+    routeId: z.string().uuid(),
+    startedAt: z.string(),
+    endedAt: z.string(),
+    durationSeconds: z.number().int(),
+    status: z.enum(["active", "completed", "cancelled"]),
+    reported: z.boolean(),
+    feedbackId: z.string().uuid().nullable(),
+    tripIssue: z
+      .enum(["tuloy_tuloy", "okay_lang", "aksidente", "baha", "sarado", "others"])
+      .nullable(),
+    othersText: z.string().nullable(),
+    tripSpeed: z.enum(["mabilis", "sakto", "matagal"]).nullable(),
+    passengerLevel: z.enum(["kaunti", "sakto", "puno", "tayuan"]).nullable(),
+    reportedAt: z.string().nullable(),
+  });
+
+  // GET /me/trip-sessions — paginated trip history with report linkage.
+  app.get(
+    "/trip-sessions",
+    {
+      preHandler: [requireAuth],
+      schema: {
+        tags: ["me"],
+        querystring: z.object({
+          limit: z.coerce.number().int().min(1).max(50).default(30),
+        }),
+        response: {
+          200: z.object({ items: z.array(TripSessionListItem) }),
+        },
+      },
+    },
+    async (req) => {
+      const userId = req.currentUser?.id;
+      if (!userId) throw NotFound("USER_NOT_FOUND", "User not found");
+
+      const { limit } = req.query;
+      const result = await db.execute<{
+        id: string;
+        client_trip_id: string;
+        route_id: string;
+        started_at: string;
+        ended_at: string;
+        duration_seconds: number;
+        status: "active" | "completed" | "cancelled";
+        feedback_id: string | null;
+        trip_issue:
+          | "tuloy_tuloy"
+          | "okay_lang"
+          | "aksidente"
+          | "baha"
+          | "sarado"
+          | "others"
+          | null;
+        others_text: string | null;
+        trip_speed: "mabilis" | "sakto" | "matagal" | null;
+        passenger_level: "kaunti" | "sakto" | "puno" | "tayuan" | null;
+        reported_at: string | null;
+      }>(sql`
+        SELECT
+          ts.id,
+          ts.client_trip_id,
+          ts.route_id,
+          ts.started_at,
+          ts.ended_at,
+          ts.duration_seconds,
+          ts.status,
+          tf.id AS feedback_id,
+          tf.trip_issue,
+          tf.others_text,
+          tf.trip_speed,
+          tf.passenger_level,
+          tf.created_at AS reported_at
+        FROM trip_sessions ts
+        LEFT JOIN trip_feedback tf
+          ON tf.user_id = ts.user_id
+         AND tf.client_uuid = ts.client_trip_id
+        WHERE ts.user_id = ${userId}::uuid
+          AND ts.status IN ('completed', 'cancelled')
+        ORDER BY ts.ended_at DESC
+        LIMIT ${limit}
+      `);
+
+      return {
+        items: result.rows.map((r) => ({
+          id: r.id,
+          clientTripId: r.client_trip_id,
+          routeId: r.route_id,
+          startedAt: new Date(r.started_at).toISOString(),
+          endedAt: new Date(r.ended_at).toISOString(),
+          durationSeconds: r.duration_seconds,
+          status: r.status,
+          reported: r.feedback_id !== null,
+          feedbackId: r.feedback_id,
+          tripIssue: r.trip_issue,
+          othersText: r.others_text,
+          tripSpeed: r.trip_speed,
+          passengerLevel: r.passenger_level,
+          reportedAt: r.reported_at ? new Date(r.reported_at).toISOString() : null,
+        })),
+      };
+    },
+  );
+
+  // PATCH /me/trip-sessions/:clientTripId/cancel — mark an active trip cancelled.
+  app.patch(
+    "/trip-sessions/:clientTripId/cancel",
+    {
+      preHandler: [requireAuth],
+      schema: {
+        tags: ["me"],
+        params: z.object({ clientTripId: z.string().uuid() }),
+        response: {
+          200: z.object({ ok: true as const, duplicate: z.boolean() }),
+        },
+      },
+    },
+    async (req) => {
+      const userId = req.currentUser?.id;
+      if (!userId) throw NotFound("USER_NOT_FOUND", "User not found");
+
+      const { clientTripId } = req.params;
+      const updated = await db.execute<{ id: string }>(sql`
+        UPDATE trip_sessions
+        SET status = 'cancelled',
+            ended_at = GREATEST(ended_at, started_at)
+        WHERE user_id = ${userId}::uuid
+          AND client_trip_id = ${clientTripId}::uuid
+          AND status = 'active'
+        RETURNING id
+      `);
+
+      if (updated.rows.length === 0) {
+        const existing = await db.execute<{ status: string }>(sql`
+          SELECT status FROM trip_sessions
+          WHERE user_id = ${userId}::uuid
+            AND client_trip_id = ${clientTripId}::uuid
+          LIMIT 1
+        `);
+        const row = existing.rows[0];
+        if (!row) {
+          throw NotFound("TRIP_NOT_FOUND", "Trip session not found");
+        }
+        if (row.status === "cancelled") {
+          return { ok: true as const, duplicate: true };
+        }
+        throw BadRequest("TRIP_NOT_CANCELLABLE", "Only active trips can be cancelled");
+      }
+
+      return { ok: true as const, duplicate: false };
     },
   );
 
@@ -501,6 +662,7 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
         SELECT
           (SELECT COUNT(*)::int FROM trip_sessions
            WHERE user_id = ${userId}::uuid
+             AND status = 'completed'
              AND started_at >= ${start.toISOString()}::timestamptz
              AND started_at < ${end.toISOString()}::timestamptz) AS trips,
           (SELECT COALESCE(SUM(duration_seconds), 0)::int FROM trip_sessions
