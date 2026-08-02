@@ -589,7 +589,7 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
         tags: ["me"],
         params: z.object({ clientTripId: z.string().uuid() }),
         response: {
-          200: z.object({ ok: true as const, duplicate: z.boolean() }),
+          200: z.object({ ok: z.literal(true), duplicate: z.boolean() }),
         },
       },
     },
