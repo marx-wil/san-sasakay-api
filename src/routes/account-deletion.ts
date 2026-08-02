@@ -10,11 +10,7 @@
 import { and, eq, gt, isNull } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
-import {
-  generateMagicToken,
-  hashIdentifier,
-  hashToken,
-} from "../auth/magic-link.js";
+import { generateMagicToken, hashIdentifier, hashToken } from "../auth/magic-link.js";
 import { env, isDev } from "../config.js";
 import { db } from "../db/client.js";
 import { accountDeletionTokens, identityProofs } from "../db/schema.js";

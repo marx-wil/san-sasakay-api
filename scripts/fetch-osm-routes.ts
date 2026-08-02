@@ -28,7 +28,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = join(__dirname, "..", "data", "osm-routes");
 const OUTPUT_FILE = join(OUTPUT_DIR, "metro-manila.geojson");
 
-const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
+/** Public Overpass mirrors — try in order; transient 502/504 is common on .de. */
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+] as const;
+
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+const MAX_ATTEMPTS_PER_ENDPOINT = 3;
 
 // Metro Manila bounding box: south, west, north, east.
 const METRO_MANILA_BBOX = [14.4, 120.85, 14.78, 121.2] as const;
@@ -114,23 +122,56 @@ async function isCacheFresh(force: boolean): Promise<boolean> {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ─── Overpass fetch ─────────────────────────────────────────────────
-async function fetchOverpass(): Promise<OverpassResponse> {
+async function fetchOverpass(): Promise<{ data: OverpassResponse; endpoint: string }> {
   const body = new URLSearchParams({ data: OVERPASS_QUERY }).toString();
-  const res = await fetch(OVERPASS_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      // Overpass enforces a UA — generic "node" gets 429'd.
-      "user-agent": "sakay-api/0.1 (https://sansasakay.com)",
-    },
-    body,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Overpass ${res.status}: ${text.slice(0, 500)}`);
+  const headers = {
+    "content-type": "application/x-www-form-urlencoded",
+    // Overpass enforces a UA — generic "node" gets 429'd.
+    "user-agent": "sakay-api/0.1 (https://sansasakay.com)",
+  };
+
+  let lastError: Error | null = null;
+
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_ENDPOINT; attempt++) {
+      try {
+        const res = await fetch(endpoint, { method: "POST", headers, body });
+        if (res.ok) {
+          return { data: (await res.json()) as OverpassResponse, endpoint };
+        }
+
+        const text = await res.text();
+        const err = new Error(`Overpass ${res.status} @ ${endpoint}: ${text.slice(0, 300)}`);
+        if (RETRYABLE_STATUS.has(res.status) && attempt < MAX_ATTEMPTS_PER_ENDPOINT) {
+          lastError = err;
+          process.stderr.write(
+            `${err.message} — retry ${attempt}/${MAX_ATTEMPTS_PER_ENDPOINT} in ${attempt * 5}s\n`,
+          );
+          await sleep(attempt * 5000);
+          continue;
+        }
+        if (RETRYABLE_STATUS.has(res.status)) {
+          lastError = err;
+          break;
+        }
+        throw err;
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("Overpass")) throw err;
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (attempt < MAX_ATTEMPTS_PER_ENDPOINT) {
+          await sleep(attempt * 3000);
+        }
+      }
+    }
+    process.stderr.write(`Overpass mirror ${endpoint} exhausted; trying next.\n`);
   }
-  return (await res.json()) as OverpassResponse;
+
+  throw lastError ?? new Error("Overpass fetch failed on all mirrors");
 }
 
 // ─── Relation → LineString assembly ─────────────────────────────────
@@ -221,8 +262,9 @@ async function main(): Promise<void> {
   process.stdout.write("Fetching from Overpass (~30-90s)...\n");
 
   let data: OverpassResponse;
+  let overpassEndpoint: string;
   try {
-    data = await fetchOverpass();
+    ({ data, endpoint: overpassEndpoint } = await fetchOverpass());
   } catch (err) {
     // If Overpass is unreachable but a (possibly stale) cache file exists,
     // warn and reuse it rather than failing the build. The seeded routes will
@@ -319,7 +361,7 @@ async function main(): Promise<void> {
   const fc: RouteFeatureCollection = {
     type: "FeatureCollection",
     generatedAt: new Date().toISOString(),
-    source: `Overpass API @ ${OVERPASS_ENDPOINT}; query bbox ${METRO_MANILA_BBOX.join(",")}`,
+    source: `Overpass API @ ${overpassEndpoint}; query bbox ${METRO_MANILA_BBOX.join(",")}`,
     features,
   };
 

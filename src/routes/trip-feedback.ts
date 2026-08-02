@@ -1,11 +1,11 @@
-import { and, eq, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
+import { and, eq, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { makeRequireAuth } from "../auth/jwt.js";
 import { db } from "../db/client.js";
 import {
-  CROWD_LEVEL,
+  type CROWD_LEVEL,
   PASSENGER_LEVEL,
   TRIP_ISSUE,
   TRIP_SPEED,
@@ -53,9 +53,7 @@ const MeItem = z.object({
   createdAt: z.string(),
 });
 
-function passengerToCrowd(
-  level: (typeof PASSENGER_LEVEL)[number],
-): (typeof CROWD_LEVEL)[number] {
+function passengerToCrowd(level: (typeof PASSENGER_LEVEL)[number]): (typeof CROWD_LEVEL)[number] {
   if (level === "kaunti") return "maluwag";
   if (level === "sakto") return "katamtaman";
   return "siksikan";

@@ -5,8 +5,8 @@ import { makeRequireAuth } from "../auth/jwt.js";
 import { hashIdentifier, normalizePhPhone } from "../auth/magic-link.js";
 import { db } from "../db/client.js";
 import {
-  ROUTE_STATUS,
   PASSENGER_LEVEL,
+  ROUTE_STATUS,
   TRANSIT_TYPE,
   identityProofs,
   pointsEvents,
@@ -522,14 +522,7 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
         duration_seconds: number;
         status: "active" | "completed" | "cancelled";
         feedback_id: string | null;
-        trip_issue:
-          | "tuloy_tuloy"
-          | "okay_lang"
-          | "aksidente"
-          | "baha"
-          | "sarado"
-          | "others"
-          | null;
+        trip_issue: "tuloy_tuloy" | "okay_lang" | "aksidente" | "baha" | "sarado" | "others" | null;
         others_text: string | null;
         trip_speed: "mabilis" | "sakto" | "matagal" | null;
         passenger_level: "kaunti" | "sakto" | "puno" | "tayuan" | null;
@@ -782,10 +775,7 @@ function currentLocalMonth(tzOffsetMinutes: number): string {
 }
 
 /** Parse YYYY-MM and return [start, end) bounds in UTC for a fixed offset. */
-function localMonthBounds(
-  month: string,
-  tzOffsetMinutes: number,
-): { start: Date; end: Date } {
+function localMonthBounds(month: string, tzOffsetMinutes: number): { start: Date; end: Date } {
   const match = /^(\d{4})-(\d{2})$/.exec(month);
   if (!match) throw BadRequest("INVALID_MONTH", "month must be YYYY-MM");
   const year = Number(match[1]);

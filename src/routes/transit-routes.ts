@@ -2,7 +2,7 @@ import { type SQL, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { db } from "../db/client.js";
-import { ROUTE_STATUS, TRANSIT_TYPE, PASSENGER_LEVEL } from "../db/schema.js";
+import { PASSENGER_LEVEL, ROUTE_STATUS, TRANSIT_TYPE } from "../db/schema.js";
 import { NotFound } from "../lib/errors.js";
 import { LATLNG_RE, parseLatLng } from "../lib/latlng.js";
 

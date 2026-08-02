@@ -43,10 +43,23 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # GeoJSON is gitignored (~90 MB). Cache it between deploys so a transient
+      # Overpass 504 does not block production; osm:fetch skips the network call
+      # when the restored file is younger than 7 days.
+      - uses: actions/cache@v4
+        with:
+          path: data/osm-routes/metro-manila.geojson
+          key: osm-routes-v1-${{ hashFiles('scripts/fetch-osm-routes.ts') }}
+          restore-keys: |
+            osm-routes-v1-
+
       - name: Fetch OSM route data
         run: |
           npm ci --include=dev
           npm run osm:fetch
+
+      - name: Verify OSM route data
+        run: test -f data/osm-routes/metro-manila.geojson
 
       - id: meta
         run: |

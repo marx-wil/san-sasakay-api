@@ -20,8 +20,8 @@ import { accountDeletionRoutes } from "./routes/account-deletion.js";
 import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
 import { reportRoutes } from "./routes/reports.js";
-import { tripFeedbackRoutes } from "./routes/trip-feedback.js";
 import { transitRouteRoutes } from "./routes/transit-routes.js";
+import { tripFeedbackRoutes } from "./routes/trip-feedback.js";
 import { waitlistRoutes } from "./routes/waitlist.js";
 import { wsRoutes } from "./routes/ws.js";
 
