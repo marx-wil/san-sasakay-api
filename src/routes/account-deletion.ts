@@ -28,8 +28,7 @@ const TokenBody = z.object({
   token: z.string().min(20).max(64),
 });
 
-const INVALID_TOKEN_MSG =
-  "This deletion link is invalid or has expired. Request a new one.";
+const INVALID_TOKEN_MSG = "This deletion link is invalid or has expired. Request a new one.";
 
 async function findValidDeletionToken(raw: string) {
   const tokenHash = hashToken(raw);
@@ -94,9 +93,7 @@ export const accountDeletionRoutes: FastifyPluginAsyncZod = async (app) => {
       if (proof) {
         const token = generateMagicToken();
         const tokenHash = hashToken(token);
-        const expiresAt = new Date(
-          Date.now() + env.ACCOUNT_DELETION_TOKEN_TTL_SECONDS * 1000,
-        );
+        const expiresAt = new Date(Date.now() + env.ACCOUNT_DELETION_TOKEN_TTL_SECONDS * 1000);
 
         await db.insert(accountDeletionTokens).values({
           tokenHash,
