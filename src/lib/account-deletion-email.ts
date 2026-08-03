@@ -7,9 +7,15 @@ import { env } from "../config.js";
 import { logger } from "./logger.js";
 import { BRAND, mailer } from "./mail.js";
 
+function formatDeletionTtl(): string {
+  const days = Math.round(env.ACCOUNT_DELETION_TOKEN_TTL_SECONDS / (60 * 60 * 24));
+  if (days === 1) return "1 araw";
+  return `${days} araw`;
+}
+
 export async function sendAccountDeletionEmail(email: string, link: string): Promise<void> {
   const subject = "Kumpirmahin ang pag-delete ng account — San Sasakay";
-  const ttlMinutes = Math.round(env.MAGIC_LINK_TTL_SECONDS / 60);
+  const ttlLabel = formatDeletionTtl();
   const year = new Date().getFullYear();
 
   const text = [
@@ -18,20 +24,21 @@ export async function sendAccountDeletionEmail(email: string, link: string): Pro
     "Kumpirmahin ang pag-delete ng account",
     "",
     "May humiling na i-delete ang San Sasakay account na naka-link sa email na ito.",
-    "Kapag pinindot mo ang link, permanenteng mabubura ang account, reports, points, at personal data mo. Hindi na ito mababawi.",
+    "Kapag binuksan mo ang link, makikita mo ang confirmation page kung saan mo puwedeng i-delete o kanselahin ang request.",
+    "Kapag kinumpirma mo ang pag-delete, permanenteng mabubura ang account, reports, points, at personal data mo. Hindi na ito mababawi.",
     "",
     link,
     "",
-    `Mag-e-expire ang link na ito sa loob ng ${ttlMinutes} minuto.`,
+    `Mag-e-expire ang link na ito sa loob ng ${ttlLabel} kung walang aksyon. Kapag kinansela mo, agad na mag-e-expire ang link.`,
     "",
-    "Hindi ikaw ang humiling nito? Balewalain mo na lang ang email — walang mabubura hangga't hindi mo pinindot ang link.",
+    "Hindi ikaw ang humiling nito? Balewalain mo na lang ang email — walang mabubura hangga't hindi mo kinukumpirma ang pag-delete.",
     "",
     "—",
     "Para sa bawat Pilipinong umuuwi.",
     `© ${year} San Sasakay`,
   ].join("\n");
 
-  const preheader = `Kumpirmahin ang pag-delete. Mag-e-expire sa ${ttlMinutes} minuto.`;
+  const preheader = `Kumpirmahin ang pag-delete. Mag-e-expire sa ${ttlLabel} kung walang aksyon.`;
 
   const html = `<!doctype html>
 <html lang="tl">
@@ -64,15 +71,18 @@ export async function sendAccountDeletionEmail(email: string, link: string): Pro
                 <p style="margin:0 0 16px 0;font-family:${BRAND.sans};font-size:15px;line-height:1.55;color:${BRAND.ink2};">
                   May humiling na i-delete ang San Sasakay account na naka-link sa email na ito.
                 </p>
+                <p style="margin:0 0 16px 0;font-family:${BRAND.sans};font-size:15px;line-height:1.55;color:${BRAND.ink2};">
+                  Kapag binuksan mo ang link, makikita mo ang confirmation page kung saan mo puwedeng i-delete o kanselahin ang request.
+                </p>
                 <p style="margin:0 0 28px 0;font-family:${BRAND.sans};font-size:15px;line-height:1.55;color:${BRAND.ink2};">
-                  Kapag pinindot mo ang button, permanenteng mabubura ang account, reports, points, at personal data mo. Hindi na ito mababawi.
+                  Kapag kinumpirma mo ang pag-delete, permanenteng mabubura ang account, reports, points, at personal data mo. Hindi na ito mababawi.
                 </p>
 
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px 0;">
                   <tr>
                     <td align="center" bgcolor="${BRAND.ink}" style="background:${BRAND.ink};border-radius:2px;">
                       <a href="${link}" style="display:inline-block;padding:14px 28px;font-family:${BRAND.mono};font-size:13px;line-height:1;letter-spacing:0.04em;text-transform:uppercase;color:#ffffff;text-decoration:none;border:1px solid ${BRAND.ink};border-radius:2px;">
-                        I-delete ang account
+                        Buksan ang confirmation page
                       </a>
                     </td>
                   </tr>
@@ -87,7 +97,7 @@ export async function sendAccountDeletionEmail(email: string, link: string): Pro
 
                 <p style="margin:0;font-family:${BRAND.mono};font-size:11px;line-height:1;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.ink3};">
                   <span style="display:inline-block;padding:6px 10px;border:1px solid ${BRAND.rule};border-radius:2px;background:${BRAND.bg};">
-                    Mag-e-expire sa ${ttlMinutes} minuto
+                    Mag-e-expire sa ${ttlLabel} kung walang aksyon
                   </span>
                 </p>
               </td>
@@ -102,7 +112,7 @@ export async function sendAccountDeletionEmail(email: string, link: string): Pro
             <tr>
               <td style="padding:0 4px 24px 4px;">
                 <p style="margin:0;font-family:${BRAND.sans};font-size:13px;line-height:1.55;color:${BRAND.ink3};">
-                  Hindi ikaw ang humiling nito? Balewalain mo na lang ang email — walang mabubura hangga't hindi mo pinindot ang link.
+                  Hindi ikaw ang humiling nito? Balewalain mo na lang ang email — walang mabubura hangga't hindi mo kinukumpirma ang pag-delete.
                 </p>
               </td>
             </tr>

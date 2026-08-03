@@ -2,6 +2,8 @@
  * Public account-deletion flow for Google Play's required web URL.
  *
  *   POST /account-deletion/request  — email in, always 202 (anti-enumeration)
+ *   POST /account-deletion/status   — read-only token check (confirmation page)
+ *   POST /account-deletion/cancel   — invalidate token without deleting
  *   POST /account-deletion/confirm  — one-time token from email link
  *
  * In-app deletion uses DELETE /me instead (authenticated).
@@ -22,9 +24,34 @@ const RequestBody = z.object({
   email: z.string().email().max(254),
 });
 
-const ConfirmBody = z.object({
+const TokenBody = z.object({
   token: z.string().min(20).max(64),
 });
+
+const INVALID_TOKEN_MSG =
+  "This deletion link is invalid or has expired. Request a new one.";
+
+async function findValidDeletionToken(raw: string) {
+  const tokenHash = hashToken(raw);
+  const now = new Date();
+
+  const [row] = await db
+    .select({
+      tokenHash: accountDeletionTokens.tokenHash,
+      userId: accountDeletionTokens.userId,
+    })
+    .from(accountDeletionTokens)
+    .where(
+      and(
+        eq(accountDeletionTokens.tokenHash, tokenHash),
+        isNull(accountDeletionTokens.usedAt),
+        gt(accountDeletionTokens.expiresAt, now),
+      ),
+    )
+    .limit(1);
+
+  return row ?? null;
+}
 
 export const accountDeletionRoutes: FastifyPluginAsyncZod = async (app) => {
   // POST /account-deletion/request — always 202.
@@ -67,7 +94,9 @@ export const accountDeletionRoutes: FastifyPluginAsyncZod = async (app) => {
       if (proof) {
         const token = generateMagicToken();
         const tokenHash = hashToken(token);
-        const expiresAt = new Date(Date.now() + env.MAGIC_LINK_TTL_SECONDS * 1000);
+        const expiresAt = new Date(
+          Date.now() + env.ACCOUNT_DELETION_TOKEN_TTL_SECONDS * 1000,
+        );
 
         await db.insert(accountDeletionTokens).values({
           tokenHash,
@@ -96,15 +125,37 @@ export const accountDeletionRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
-  // POST /account-deletion/confirm — consume a one-time token and hard-delete.
-  // Invalid / expired / already-used tokens all map to the same 400 so we
-  // don't leak whether a prior request existed.
+  // POST /account-deletion/status — read-only token check for the confirmation page.
   app.post(
-    "/confirm",
+    "/status",
     {
       schema: {
         tags: ["account-deletion"],
-        body: ConfirmBody,
+        body: TokenBody,
+        response: {
+          200: z.object({ valid: z.literal(true) }),
+        },
+      },
+      config: {
+        rateLimit: { max: 20, timeWindow: "15 minutes" },
+      },
+    },
+    async (req) => {
+      const row = await findValidDeletionToken(req.body.token);
+      if (!row) {
+        throw BadRequest("INVALID_TOKEN", INVALID_TOKEN_MSG);
+      }
+      return { valid: true as const };
+    },
+  );
+
+  // POST /account-deletion/cancel — invalidate token without deleting the account.
+  app.post(
+    "/cancel",
+    {
+      schema: {
+        tags: ["account-deletion"],
+        body: TokenBody,
         response: {
           200: z.object({ ok: z.literal(true) }),
         },
@@ -114,30 +165,45 @@ export const accountDeletionRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req) => {
-      const tokenHash = hashToken(req.body.token);
-      const now = new Date();
-
-      const [row] = await db
-        .select({
-          tokenHash: accountDeletionTokens.tokenHash,
-          userId: accountDeletionTokens.userId,
-        })
-        .from(accountDeletionTokens)
-        .where(
-          and(
-            eq(accountDeletionTokens.tokenHash, tokenHash),
-            isNull(accountDeletionTokens.usedAt),
-            gt(accountDeletionTokens.expiresAt, now),
-          ),
-        )
-        .limit(1);
-
+      const row = await findValidDeletionToken(req.body.token);
       if (!row) {
-        throw BadRequest(
-          "INVALID_TOKEN",
-          "This deletion link is invalid or has expired. Request a new one.",
-        );
+        throw BadRequest("INVALID_TOKEN", INVALID_TOKEN_MSG);
       }
+
+      const now = new Date();
+      await db
+        .update(accountDeletionTokens)
+        .set({ usedAt: now })
+        .where(eq(accountDeletionTokens.tokenHash, row.tokenHash));
+
+      return { ok: true as const };
+    },
+  );
+
+  // POST /account-deletion/confirm — consume a one-time token and hard-delete.
+  // Invalid / expired / already-used tokens all map to the same 400 so we
+  // don't leak whether a prior request existed.
+  app.post(
+    "/confirm",
+    {
+      schema: {
+        tags: ["account-deletion"],
+        body: TokenBody,
+        response: {
+          200: z.object({ ok: z.literal(true) }),
+        },
+      },
+      config: {
+        rateLimit: { max: 10, timeWindow: "15 minutes" },
+      },
+    },
+    async (req) => {
+      const row = await findValidDeletionToken(req.body.token);
+      if (!row) {
+        throw BadRequest("INVALID_TOKEN", INVALID_TOKEN_MSG);
+      }
+
+      const now = new Date();
 
       // Mark used before delete so a concurrent confirm can't double-fire.
       // User delete cascades the token row anyway; marking used first is

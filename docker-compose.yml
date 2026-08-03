@@ -23,6 +23,7 @@ x-app-env: &app-env
   JWT_ISSUER: sakay-api
   JWT_TTL_SECONDS: "2592000"
   MAGIC_LINK_TTL_SECONDS: "600"
+  ACCOUNT_DELETION_TOKEN_TTL_SECONDS: "604800"
   EMAIL_PROVIDER: mailpit
   EMAIL_FROM: "San Sasakay <no-reply@sansasakay.dev>"
   SMTP_HOST: mailpit

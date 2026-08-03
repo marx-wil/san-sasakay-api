@@ -29,6 +29,13 @@ const EnvSchema = z.object({
 
   MAGIC_LINK_TTL_SECONDS: z.coerce.number().int().positive().default(600),
 
+  // Public web account-deletion confirm links (separate from auth magic links).
+  ACCOUNT_DELETION_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 60 * 24 * 7),
+
   EMAIL_PROVIDER: z.enum(["mailpit", "resend"]).default("mailpit"),
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().min(1),
