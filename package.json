@@ -22,6 +22,7 @@
     "db:migrate": "tsx --env-file=.env src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx --env-file=.env src/db/seed.ts",
+    "db:seed:reports": "tsx --env-file=.env src/db/seed-reports.ts",
     "osm:fetch": "tsx scripts/fetch-osm-routes.ts"
   },
   "dependencies": {

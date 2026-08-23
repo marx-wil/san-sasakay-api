@@ -2,6 +2,12 @@ import { sql } from "drizzle-orm";
 import { env } from "../config.js";
 import { db } from "../db/client.js";
 import { logger } from "../lib/logger.js";
+import {
+  CONFIDENCE_SATURATION_REPORTS,
+  ageMinutesSql,
+  decayFactorSql,
+  windowIntervalSql,
+} from "../lib/report-window.js";
 
 /**
  * RouteStatus aggregator.
@@ -17,6 +23,8 @@ import { logger } from "../lib/logger.js";
  *
  * Reports decay linearly from REPORT_DECAY_START_MINUTES to REPORT_EXPIRY_MINUTES,
  * weighted by user credibility at submission time (snapshotted in reports.weight).
+ * The window and decay curve come from lib/report-window.ts so the read-side
+ * summary endpoint cannot drift from what this writes.
  *
  * Routes with no reports in the window stay at last value, with status flipping
  * to 'hindi_alam' once stale.
@@ -25,9 +33,6 @@ import { logger } from "../lib/logger.js";
  * runs in well under a second on Phase 1 volumes.
  */
 export async function runAggregatorOnce(): Promise<{ touchedRoutes: number }> {
-  const decayStart = env.REPORT_DECAY_START_MINUTES;
-  const expiry = env.REPORT_EXPIRY_MINUTES;
-
   const result = await db.execute<{ route_id: string }>(sql`
     WITH windowed AS (
       SELECT
@@ -35,21 +40,15 @@ export async function runAggregatorOnce(): Promise<{ touchedRoutes: number }> {
         r.status,
         r.weight,
         r.created_at,
-        EXTRACT(EPOCH FROM (NOW() - r.created_at)) / 60.0 AS age_min
+        ${ageMinutesSql(sql.raw("r.created_at"))} AS age_min
       FROM reports r
-      WHERE r.created_at > NOW() - INTERVAL '${sql.raw(String(expiry))} minutes'
+      WHERE r.created_at > NOW() - ${windowIntervalSql()}
     ),
     weighted AS (
       SELECT
         route_id,
         status,
-        weight * GREATEST(
-          0,
-          CASE
-            WHEN age_min <= ${decayStart} THEN 1.0
-            ELSE 1.0 - ((age_min - ${decayStart}) / NULLIF(${expiry - decayStart}, 0))
-          END
-        ) AS w,
+        weight * ${decayFactorSql()} AS w,
         created_at
       FROM windowed
     ),
@@ -80,8 +79,12 @@ export async function runAggregatorOnce(): Promise<{ touchedRoutes: number }> {
         route_last_at AS last_report_at,
         -- Confidence: agreement share * volume saturation.
         -- Agreement = winner_weight / total_weight (0..1).
-        -- Volume saturation = LEAST(1, total_cnt / 8)  — 8+ reports = full confidence.
-        LEAST(1.0, (sw / NULLIF(total_w, 0)) * LEAST(1.0, total_cnt::REAL / 8.0))::REAL AS confidence
+        -- Volume saturation = LEAST(1, total_cnt / N) — N+ reports = full confidence.
+        LEAST(
+          1.0,
+          (sw / NULLIF(total_w, 0))
+            * LEAST(1.0, total_cnt::REAL / ${CONFIDENCE_SATURATION_REPORTS}::REAL)
+        )::REAL AS confidence
       FROM ranked
       WHERE rn = 1
     )
@@ -104,9 +107,7 @@ export async function runAggregatorOnce(): Promise<{ touchedRoutes: number }> {
         confidence = 0,
         updated_at = NOW()
     WHERE status <> 'hindi_alam'
-      AND (last_report_at IS NULL OR last_report_at < NOW() - INTERVAL '${sql.raw(
-        String(expiry),
-      )} minutes')
+      AND (last_report_at IS NULL OR last_report_at < NOW() - ${windowIntervalSql()})
   `);
 
   // Aggregate passenger_level from trip_feedback in the same window.
@@ -117,21 +118,15 @@ export async function runAggregatorOnce(): Promise<{ touchedRoutes: number }> {
         tf.passenger_level,
         tf.weight,
         tf.created_at,
-        EXTRACT(EPOCH FROM (NOW() - tf.created_at)) / 60.0 AS age_min
+        ${ageMinutesSql(sql.raw("tf.created_at"))} AS age_min
       FROM trip_feedback tf
-      WHERE tf.created_at > NOW() - INTERVAL '${sql.raw(String(expiry))} minutes'
+      WHERE tf.created_at > NOW() - ${windowIntervalSql()}
     ),
     weighted AS (
       SELECT
         route_id,
         passenger_level,
-        weight * GREATEST(
-          0,
-          CASE
-            WHEN age_min <= ${decayStart} THEN 1.0
-            ELSE 1.0 - ((age_min - ${decayStart}) / NULLIF(${expiry - decayStart}, 0))
-          END
-        ) AS w
+        weight * ${decayFactorSql()} AS w
       FROM windowed
     ),
     per_level AS (
@@ -170,7 +165,7 @@ export async function runAggregatorOnce(): Promise<{ touchedRoutes: number }> {
         SELECT 1
         FROM trip_feedback tf
         WHERE tf.route_id = rs.route_id
-          AND tf.created_at > NOW() - INTERVAL '${sql.raw(String(expiry))} minutes'
+          AND tf.created_at > NOW() - ${windowIntervalSql()}
       )
   `);
 
