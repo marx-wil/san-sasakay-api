@@ -33,8 +33,8 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { LRUCache } from "../lib/lru-cache.js";
-import { PLACE_KINDS } from "./place-rank.js";
 import { type NominatimResult, searchPlaces as nominatimSearch } from "./nominatim.js";
+import { PLACE_KINDS } from "./place-rank.js";
 
 const PlaceResult = z.object({
   id: z.string(),

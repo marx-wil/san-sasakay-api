@@ -25,8 +25,8 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
-import { classifyStoredRoute, codePrefixFor } from "../lib/osm-route-type.js";
 import { logger } from "../lib/logger.js";
+import { classifyStoredRoute, codePrefixFor } from "../lib/osm-route-type.js";
 import { db, pool } from "./client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

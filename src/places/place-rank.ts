@@ -10,14 +10,7 @@
  *   5. Sort mall/POI → stop/station → building → street.
  */
 
-export const PLACE_KINDS = [
-  "mall",
-  "bus_stop",
-  "station",
-  "street",
-  "building",
-  "place",
-] as const;
+export const PLACE_KINDS = ["mall", "bus_stop", "station", "street", "building", "place"] as const;
 
 export type PlaceKind = (typeof PLACE_KINDS)[number];
 
@@ -77,12 +70,7 @@ export function classifyPlaceKind(osmClass?: string, osmType?: string): PlaceKin
     return "bus_stop";
   }
 
-  if (
-    cls === "railway" ||
-    typ === "station" ||
-    typ === "halt" ||
-    typ === "ferry_terminal"
-  ) {
+  if (cls === "railway" || typ === "station" || typ === "halt" || typ === "ferry_terminal") {
     return "station";
   }
 
@@ -111,10 +99,7 @@ function normalizeName(name: string): string {
     .trim();
 }
 
-function haversineMeters(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
+function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6_371_000;
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(b.lat - a.lat);

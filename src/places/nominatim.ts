@@ -25,7 +25,7 @@
 
 import { env } from "../config.js";
 import { logger } from "../lib/logger.js";
-import { rankPlaces, type PlaceKind } from "./place-rank.js";
+import { type PlaceKind, rankPlaces } from "./place-rank.js";
 
 // Metro Manila bounding box: ~120.90°E,14.40°N → ~121.15°E,14.80°N.
 // `viewbox` order in Nominatim is left,top,right,bottom (i.e. west,

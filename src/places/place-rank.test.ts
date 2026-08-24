@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  classifyPlaceKind,
-  placeSubtitle,
-  rankPlaces,
-  type RankablePlace,
-} from "./place-rank.js";
+import { type RankablePlace, classifyPlaceKind, placeSubtitle, rankPlaces } from "./place-rank.js";
 
 test("classifyPlaceKind maps OSM class/type to commute kinds", () => {
   assert.equal(classifyPlaceKind("shop", "mall"), "mall");

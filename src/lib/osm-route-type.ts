@@ -37,8 +37,7 @@ export function pickType(tags: OsmRouteTags): OsmRouteType | null {
   const network = norm(tags.network);
   const name = tags.name ?? "";
 
-  const isShareTaxi =
-    route === "share_taxi" || route === "share_taxi" || route === "uv_express";
+  const isShareTaxi = route === "share_taxi" || route === "share_taxi" || route === "uv_express";
   if (isShareTaxi || /\buv express\b/i.test(name)) return "uv_express";
 
   if (/carousel/i.test(name)) return "carousel";

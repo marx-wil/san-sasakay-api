@@ -5,10 +5,7 @@ import { classifyStoredRoute, codePrefixFor, pickType } from "./osm-route-type.j
 test("pickType: share_taxi / UV Express name → uv_express", () => {
   assert.equal(pickType({ route: "share_taxi" }), "uv_express");
   assert.equal(pickType({ route: "share_taxi" }), "uv_express");
-  assert.equal(
-    pickType({ route: "bus", name: "Lawton–Paliparan Site UV Express" }),
-    "uv_express",
-  );
+  assert.equal(pickType({ route: "bus", name: "Lawton–Paliparan Site UV Express" }), "uv_express");
 });
 
 test("pickType: Carousel in the name beats network=NCR bus", () => {
