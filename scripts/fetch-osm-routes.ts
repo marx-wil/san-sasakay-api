@@ -23,6 +23,7 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pickType, type OsmRouteType } from "../src/lib/osm-route-type.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = join(__dirname, "..", "data", "osm-routes");
@@ -91,7 +92,7 @@ type Coord = [Lng, Lat];
 type RouteFeatureProps = {
   ref: string | null;
   name: string;
-  type: "jeepney" | "uv_express";
+  type: OsmRouteType;
   osmRelationId: number;
   network: string | null;
   operator: string | null;
@@ -231,13 +232,6 @@ function dedupe(coords: Coord[]): Coord[] {
 
 /** Roles whose ways are part of the route's drawn path. */
 const GEOMETRY_ROLES = new Set(["", "forward", "backward"]);
-
-function pickType(tags: Record<string, string>): RouteFeatureProps["type"] | null {
-  const route = tags.route;
-  if (route === "share_taxi") return "uv_express";
-  if (route === "bus" || route === "minibus") return "jeepney";
-  return null;
-}
 
 function nameFor(tags: Record<string, string>): string {
   const name = tags.name?.trim();

@@ -68,7 +68,15 @@ export const ROUTE_STATUS = ["tumatakbo", "limitado", "hindi_tumatakbo", "hindi_
 /** Wire enum. App displays: tumatakbo→Mabilis, limitado→Sakto lang, hindi_tumatakbo→Matagal, hindi_alam→Hindi alam. */
 export type RouteStatus = (typeof ROUTE_STATUS)[number];
 
-export const TRANSIT_TYPE = ["jeepney", "uv_express", "p2p_bus", "tricycle", "ferry"] as const;
+export const TRANSIT_TYPE = [
+  "jeepney",
+  "uv_express",
+  "p2p_bus",
+  "carousel",
+  "interregional_bus",
+  "tricycle",
+  "ferry",
+] as const;
 export type TransitType = (typeof TRANSIT_TYPE)[number];
 
 export const IDENTITY_PROVIDER = ["email", "phone", "philsys"] as const;

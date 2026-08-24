@@ -59,7 +59,8 @@ const FAKE_RESULTS: NominatimResult[] = [
     displayName: "SM City North EDSA, North Avenue, Quezon City, Metro Manila, Philippines",
     lat: 14.6566,
     lng: 121.0287,
-    kind: "shop",
+    kind: "mall",
+    subtitle: "North Avenue, Quezon City",
   },
 ];
 

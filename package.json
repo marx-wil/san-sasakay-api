@@ -17,7 +17,7 @@
     "lint": "biome check src",
     "lint:fix": "biome check --write src",
     "format": "biome format --write src",
-    "test": "tsx --env-file=.env --test src/lib/lru-cache.test.ts src/lib/latlng.test.ts src/places/routes.test.ts",
+    "test": "tsx --env-file=.env --test src/lib/lru-cache.test.ts src/lib/latlng.test.ts src/lib/osm-route-type.test.ts src/places/routes.test.ts src/places/place-rank.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file=.env src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",

@@ -25,6 +25,7 @@
 
 import { env } from "../config.js";
 import { logger } from "../lib/logger.js";
+import { rankPlaces, type PlaceKind } from "./place-rank.js";
 
 // Metro Manila bounding box: ~120.90°E,14.40°N → ~121.15°E,14.80°N.
 // `viewbox` order in Nominatim is left,top,right,bottom (i.e. west,
@@ -43,8 +44,10 @@ export type NominatimResult = {
   displayName: string;
   lat: number;
   lng: number;
-  /** OSM class/type passthrough ("amenity", "shop"…). Lets clients filter. */
-  kind?: string;
+  /** Commute kind — mall vs bus stop vs street, not the raw OSM class. */
+  kind: PlaceKind;
+  /** Address line with the title and trailing country stripped. */
+  subtitle: string;
 };
 
 type NominatimSearchRow = {
@@ -96,10 +99,9 @@ export async function searchPlaces(opts: SearchOptions): Promise<NominatimResult
   url.searchParams.set("countrycodes", "ph");
   url.searchParams.set("viewbox", VIEWBOX);
   url.searchParams.set("bounded", "1");
-  // We don't render the structured address breakdown today — keep the
-  // payload minimal so the upstream returns sooner.
-  url.searchParams.set("addressdetails", "0");
-  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("addressdetails", "1");
+  // Fetch extra rows so clone-collapse still fills the client cap.
+  url.searchParams.set("limit", String(Math.min(12, Math.max(limit * 2, limit))));
   // Accept-Language Tagalog-first with an English fallback. Nominatim
   // honours this for `display_name` localisation where translations exist.
   url.searchParams.set("accept-language", "tl,en");
@@ -122,7 +124,7 @@ export async function searchPlaces(opts: SearchOptions): Promise<NominatimResult
   const json = (await res.json()) as NominatimSearchRow[];
   if (!Array.isArray(json)) return [];
 
-  const out: NominatimResult[] = [];
+  const mapped = [];
   for (const row of json) {
     const lat = typeof row.lat === "string" ? Number(row.lat) : Number.NaN;
     const lng = typeof row.lon === "string" ? Number(row.lon) : Number.NaN;
@@ -132,17 +134,22 @@ export async function searchPlaces(opts: SearchOptions): Promise<NominatimResult
     // Stable id: "N12345" / "W12345" / "R12345" — first letter of
     // osm_type, then osm_id. Falls back to a coordinate string when
     // the upstream omits one (some self-hosted Photon mirrors do).
-    const osmType = typeof row.osm_type === "string" ? row.osm_type[0] : "?";
+    const osmTypeLetter = typeof row.osm_type === "string" ? row.osm_type[0] : "?";
     const osmId =
       typeof row.osm_id === "number" || typeof row.osm_id === "string"
         ? String(row.osm_id)
         : `${lat.toFixed(5)}_${lng.toFixed(5)}`;
-    const id = `${osmType}${osmId}`;
-    // Short label = first comma chunk; commuters scan that, not the
-    // 60-char display_name suffix ("..., Quezon City, Metro Manila, ...").
+    const id = `${osmTypeLetter}${osmId}`;
     const name = display.split(",", 1)[0]?.trim() || display;
-    const kind = row.class || row.type || undefined;
-    out.push({ id, name, displayName: display, lat, lng, kind });
+    mapped.push({
+      id,
+      name,
+      displayName: display,
+      lat,
+      lng,
+      osmClass: row.class,
+      osmType: row.type,
+    });
   }
-  return out;
+  return rankPlaces(mapped, limit);
 }

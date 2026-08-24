@@ -33,6 +33,7 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { LRUCache } from "../lib/lru-cache.js";
+import { PLACE_KINDS } from "./place-rank.js";
 import { type NominatimResult, searchPlaces as nominatimSearch } from "./nominatim.js";
 
 const PlaceResult = z.object({
@@ -41,7 +42,8 @@ const PlaceResult = z.object({
   displayName: z.string(),
   lat: z.number(),
   lng: z.number(),
-  kind: z.string().optional(),
+  kind: z.enum(PLACE_KINDS).optional(),
+  subtitle: z.string().optional(),
 });
 
 // Cap entries low — a single API process running this whole region

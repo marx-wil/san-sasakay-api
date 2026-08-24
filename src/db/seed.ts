@@ -25,20 +25,21 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
+import { classifyStoredRoute, codePrefixFor } from "../lib/osm-route-type.js";
 import { logger } from "../lib/logger.js";
 import { db, pool } from "./client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GEOJSON_PATH = join(__dirname, "..", "..", "data", "osm-routes", "metro-manila.geojson");
 
-type RouteType = "jeepney" | "uv_express";
+type StoredRouteType = "jeepney" | "uv_express";
 
 type RouteFeature = {
   type: "Feature";
   properties: {
     ref: string | null;
     name: string;
-    type: RouteType;
+    type: StoredRouteType | string;
     osmRelationId: number;
     network: string | null;
     operator: string | null;
@@ -51,14 +52,12 @@ type RouteFeatureCollection = {
   features: RouteFeature[];
 };
 
-const TYPE_PREFIX: Record<RouteType, string> = {
-  jeepney: "JEEP",
-  uv_express: "UV",
-};
-
 function codeFor(f: RouteFeature): string {
   const ref = f.properties.ref?.trim();
-  if (ref) return `${TYPE_PREFIX[f.properties.type]}-${ref}`;
+  // Prefix follows the original GeoJSON class so refining jeepney →
+  // carousel / p2p_bus does not mint a new code and orphan FKs.
+  const prefix = codePrefixFor(f.properties.type);
+  if (ref) return `${prefix}-${ref}`;
   return `OSM-${f.properties.osmRelationId}`;
 }
 
@@ -105,6 +104,11 @@ async function seed(): Promise<void> {
       continue;
     }
     const code = codeFor(f);
+    const classified = classifyStoredRoute({
+      type: f.properties.type,
+      network: f.properties.network,
+      name: f.properties.name,
+    });
     const geomJson = JSON.stringify(f.geometry);
     try {
       await db.execute(sql`
@@ -112,7 +116,7 @@ async function seed(): Promise<void> {
         VALUES (
           ${code},
           ${f.properties.name},
-          ${f.properties.type},
+          ${classified},
           ST_SetSRID(ST_GeomFromGeoJSON(${geomJson}), 4326)::geography
         )
         ON CONFLICT (code) DO UPDATE
