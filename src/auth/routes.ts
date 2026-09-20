@@ -60,6 +60,14 @@ const VerifyResponse = z.object({
   }),
 });
 
+const StatusBody = z.object({
+  token: z.string().min(20).max(64),
+});
+
+const StatusResponse = z.object({
+  status: z.enum(["valid", "expired", "used", "invalid"]),
+});
+
 export const authRoutes: FastifyPluginAsyncZod = async (app) => {
   // POST /auth/request — accepts an email, sends a magic-link.
   // Always returns 202 to prevent account enumeration: the response shape
@@ -121,11 +129,11 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       // Email CTA points at the web (sansasakay.com), not the API. The
-      // /auth/verify page on the landing is a brand-aligned bridge: it
-      // immediately deep-links into the mobile app via the sansasakay://
-      // scheme and lets the app's DeepLinkAuthBridge consume the token.
-      // The web page never calls /auth/verify itself, so the magic token
-      // isn't burned if the user opened the email on the wrong device.
+      // /auth/verify page on the landing peeks POST /auth/status first,
+      // then deep-links into the mobile app via the sansasakay:// scheme
+      // only when the token is still valid. The web page never calls
+      // GET /auth/verify itself, so the magic token isn't burned if the
+      // user opened the email on the wrong device.
       const link = `${env.PUBLIC_WEB_URL}/auth/verify?token=${token}`;
 
       try {
@@ -155,6 +163,43 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
 
       reply.code(202);
       return { ok: true as const };
+    },
+  );
+
+  // POST /auth/status — read-only peek for the landing /auth/verify page.
+  // Does not consume the token, create a user, or issue a JWT. The landing
+  // uses this to refuse deep-linking expired/used links into the app.
+  app.post(
+    "/status",
+    {
+      schema: {
+        tags: ["auth"],
+        body: StatusBody,
+        response: {
+          200: StatusResponse,
+        },
+      },
+      config: {
+        rateLimit: { max: 20, timeWindow: "15 minutes" },
+      },
+    },
+    async (req) => {
+      const tokenHash = hashToken(req.body.token);
+      const now = Date.now();
+
+      const [row] = await db
+        .select({
+          expiresAt: magicLinkTokens.expiresAt,
+          usedAt: magicLinkTokens.usedAt,
+        })
+        .from(magicLinkTokens)
+        .where(eq(magicLinkTokens.tokenHash, tokenHash))
+        .limit(1);
+
+      if (!row) return { status: "invalid" as const };
+      if (row.usedAt) return { status: "used" as const };
+      if (row.expiresAt.getTime() <= now) return { status: "expired" as const };
+      return { status: "valid" as const };
     },
   );
 
