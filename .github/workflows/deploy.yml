@@ -49,9 +49,10 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: data/osm-routes/metro-manila.geojson
-          key: osm-routes-v1-${{ hashFiles('scripts/fetch-osm-routes.ts') }}
+          # v2: bust pre-stop-extraction GeoJSON still sitting in v1 restore-keys.
+          key: osm-routes-v2-stops-${{ hashFiles('scripts/fetch-osm-routes.ts') }}
           restore-keys: |
-            osm-routes-v1-
+            osm-routes-v2-stops-
 
       - name: Fetch OSM route data
         run: |
@@ -59,7 +60,17 @@ jobs:
           npm run osm:fetch
 
       - name: Verify OSM route data
-        run: test -f data/osm-routes/metro-manila.geojson
+        run: |
+          test -f data/osm-routes/metro-manila.geojson
+          node -e "
+          const fc = JSON.parse(require('fs').readFileSync('data/osm-routes/metro-manila.geojson', 'utf8'));
+          const withStops = fc.features.filter((f) => (f.properties?.stops?.length ?? 0) > 0).length;
+          if (withStops === 0) {
+            console.error('metro-manila.geojson has no properties.stops — run: npm run osm:fetch -- --force');
+            process.exit(1);
+          }
+          console.log('OSM routes with stops:', withStops, '/', fc.features.length);
+          "
 
       - id: meta
         run: |
