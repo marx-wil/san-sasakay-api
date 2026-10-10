@@ -12,6 +12,7 @@ import {
   identityProofs,
   users,
 } from "../db/schema.js";
+import { ensureTransitRouteExists } from "../lib/ensure-route.js";
 import { BadRequest, Forbidden } from "../lib/errors.js";
 
 const SubmitBody = z
@@ -104,6 +105,8 @@ export const tripFeedbackRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const body = req.body;
+
+      await ensureTransitRouteExists(body.routeId);
 
       const [u] = await db
         .select({ score: users.credibilityScore })

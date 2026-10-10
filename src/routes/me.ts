@@ -13,6 +13,7 @@ import {
   users,
 } from "../db/schema.js";
 import { deleteUserAccount } from "../lib/delete-user.js";
+import { ensureTransitRouteExists } from "../lib/ensure-route.js";
 import { BadRequest, Conflict, NotFound } from "../lib/errors.js";
 
 // Anti-farming gate for redemption. Both thresholds must be met before any
@@ -421,6 +422,8 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!userId) throw NotFound("USER_NOT_FOUND", "User not found");
 
       const { clientTripId, routeId, startedAt, endedAt } = req.body;
+      await ensureTransitRouteExists(routeId);
+
       const started = new Date(startedAt);
       const ended = new Date(endedAt);
       if (Number.isNaN(started.getTime()) || Number.isNaN(ended.getTime())) {
