@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  extractRelationStops,
-  isStopMemberRole,
-  type OsmNodeForStop,
-} from "./osm-route-stops.js";
+import { type OsmNodeForStop, extractRelationStops, isStopMemberRole } from "./osm-route-stops.js";
 
 test("isStopMemberRole: stop and platform", () => {
   assert.equal(isStopMemberRole("stop"), true);

@@ -31,8 +31,7 @@ export function isStopMemberRole(role: string): boolean {
 }
 
 function nameForStop(tags: Record<string, string> | undefined, seq: number): string {
-  const name =
-    tags?.name?.trim() || tags?.["name:en"]?.trim() || tags?.ref?.trim();
+  const name = tags?.name?.trim() || tags?.["name:en"]?.trim() || tags?.ref?.trim();
   if (name) return name;
   return `Stop ${seq}`;
 }

@@ -716,13 +716,19 @@ aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name AWS-RunShellScript \
   --comment "Seed transit_routes from OSM" \
-  --parameters 'commands=["cd /opt/sakay && docker compose run --rm api node dist/db/seed.js"]' \
+  --parameters 'commands=["cd /opt/sakay && docker compose --profile app run --rm api node dist/db/seed.js"]' \
   --region ap-southeast-1
 ```
 
 Idempotent: the seed upserts via `ON CONFLICT (code) DO UPDATE`, so
 re-running it after a fresh deploy propagates upstream OSM edits to the
 DB without manual SQL.
+
+Expect log fields like `routesWithStops` and `stopsInserted` (thousands
+of stops). If you see `routesWithStops: 0`, the **running Docker image**
+still has an old `metro-manila.geojson` without `properties.stops` —
+merge/deploy the stop-extraction build (or re-run the `deploy` workflow
+after the CI cache key bump), then seed again.
 
 Build-time tradeoff: if Overpass is unreachable when CI runs, the image
 build fails. That's deliberate — silently shipping a stale OSM snapshot

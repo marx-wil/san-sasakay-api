@@ -98,10 +98,7 @@ function dedupeByCode(features: RouteFeature[]): RouteFeature[] {
   return [...best.values()];
 }
 
-async function replaceRouteStops(
-  routeId: string,
-  stops: RouteStopSeed[],
-): Promise<void> {
+async function replaceRouteStops(routeId: string, stops: RouteStopSeed[]): Promise<void> {
   await db.execute(sql`
     DELETE FROM stops WHERE route_id = ${routeId}::uuid
   `);
@@ -136,8 +133,19 @@ async function seed(): Promise<void> {
 
   const fc = JSON.parse(raw) as RouteFeatureCollection;
   const features = dedupeByCode(fc.features);
+  const geojsonRoutesWithStops = fc.features.filter(
+    (f) => (f.properties.stops?.length ?? 0) > 0,
+  ).length;
 
-  logger.info({ total: fc.features.length, unique: features.length }, "Loaded OSM routes");
+  logger.info(
+    { total: fc.features.length, unique: features.length, geojsonRoutesWithStops },
+    "Loaded OSM routes",
+  );
+  if (geojsonRoutesWithStops === 0) {
+    logger.warn(
+      "GeoJSON has no properties.stops — deploy a newer API image (osm:fetch with stop extraction) then re-run seed",
+    );
+  }
 
   let upserted = 0;
   let skipped = 0;
@@ -191,10 +199,7 @@ async function seed(): Promise<void> {
     }
   }
 
-  logger.info(
-    { upserted, skipped, routesWithStops, stopsInserted },
-    "seed complete",
-  );
+  logger.info({ upserted, skipped, routesWithStops, stopsInserted }, "seed complete");
 }
 
 seed()
