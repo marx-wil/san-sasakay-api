@@ -23,6 +23,7 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { extractRelationStops } from "../src/lib/osm-route-stops.js";
 import { pickType, type OsmRouteType } from "../src/lib/osm-route-type.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -52,7 +53,7 @@ const OVERPASS_QUERY = `
 );
 out body;
 >;
-out skel qt;
+out body qt;
 `.trim();
 
 // ─── Overpass response shapes ───────────────────────────────────────
@@ -61,6 +62,7 @@ type OverpassNode = {
   id: number;
   lat: number;
   lon: number;
+  tags?: Record<string, string>;
 };
 type OverpassWay = {
   type: "way";
@@ -89,6 +91,13 @@ type Lng = number;
 type Lat = number;
 type Coord = [Lng, Lat];
 
+type RouteStopProps = {
+  seq: number;
+  name: string;
+  lng: number;
+  lat: number;
+};
+
 type RouteFeatureProps = {
   ref: string | null;
   name: string;
@@ -96,6 +105,7 @@ type RouteFeatureProps = {
   osmRelationId: number;
   network: string | null;
   operator: string | null;
+  stops: RouteStopProps[];
 };
 
 type RouteFeature = {
@@ -278,12 +288,17 @@ async function main(): Promise<void> {
   }
 
   const nodeMap = new Map<number, Coord>();
+  const nodeMeta = new Map<
+    number,
+    { lng: number; lat: number; tags?: Record<string, string> }
+  >();
   const wayMap = new Map<number, number[]>();
   const relations: OverpassRelation[] = [];
 
   for (const el of data.elements) {
     if (el.type === "node") {
       nodeMap.set(el.id, [el.lon, el.lat]);
+      nodeMeta.set(el.id, { lng: el.lon, lat: el.lat, tags: el.tags });
     } else if (el.type === "way") {
       wayMap.set(el.id, el.nodes);
     } else if (el.type === "relation") {
@@ -338,6 +353,8 @@ async function main(): Promise<void> {
       continue;
     }
 
+    const stops = extractRelationStops(rel.members, nodeMeta);
+
     features.push({
       type: "Feature",
       properties: {
@@ -347,6 +364,7 @@ async function main(): Promise<void> {
         osmRelationId: rel.id,
         network: tags.network?.trim() ?? null,
         operator: tags.operator?.trim() ?? null,
+        stops,
       },
       geometry: { type: "LineString", coordinates: stitched },
     });
@@ -362,9 +380,10 @@ async function main(): Promise<void> {
   await mkdir(OUTPUT_DIR, { recursive: true });
   await writeFile(OUTPUT_FILE, JSON.stringify(fc, null, 2), "utf8");
 
+  const withStops = features.filter((f) => f.properties.stops.length > 0).length;
   process.stdout.write(
     `Wrote ${features.length} routes to ${OUTPUT_FILE} ` +
-      `(skipped ${skippedNoType} non-PUJ, ${skippedNoGeom} bad geometry).\n`,
+      `(${withStops} with stops; skipped ${skippedNoType} non-PUJ, ${skippedNoGeom} bad geometry).\n`,
   );
 }
 

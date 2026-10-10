@@ -241,7 +241,8 @@ npm run dev:worker        # worker (separate terminal)
 
 # Database
 npm run db:migrate        # apply pending SQL migrations
-npm run db:seed           # insert 5 sample MM routes
+npm run osm:fetch         # refresh OSM route + stop cache (GeoJSON)
+npm run db:seed           # upsert all cached routes + stops into Postgres
 npm run db:studio         # browse data in a web UI
 
 # Quality

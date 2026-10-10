@@ -7,6 +7,10 @@
  * geometry on every run, so re-seeding after a fresh `osm:fetch`
  * propagates upstream OSM edits to the DB without manual SQL.
  *
+ * Stops come from OSM relation members (role=stop/platform) embedded
+ * in the GeoJSON by `osm:fetch`. Each re-seed replaces stops for that
+ * route; locations are snapped to the route polyline.
+ *
  * Code naming:
  *   - Prefer `JEEP-<ref>` / `UV-<ref>` for routes that have an LTFRB
  *     route number tagged on the OSM relation (e.g. "T101", "300").
@@ -34,6 +38,13 @@ const GEOJSON_PATH = join(__dirname, "..", "..", "data", "osm-routes", "metro-ma
 
 type StoredRouteType = "jeepney" | "uv_express";
 
+type RouteStopSeed = {
+  seq: number;
+  name: string;
+  lng: number;
+  lat: number;
+};
+
 type RouteFeature = {
   type: "Feature";
   properties: {
@@ -43,6 +54,7 @@ type RouteFeature = {
     osmRelationId: number;
     network: string | null;
     operator: string | null;
+    stops?: RouteStopSeed[];
   };
   geometry: { type: "LineString"; coordinates: [number, number][] };
 };
@@ -71,11 +83,43 @@ function dedupeByCode(features: RouteFeature[]): RouteFeature[] {
   for (const f of features) {
     const code = codeFor(f);
     const prev = best.get(code);
-    if (!prev || f.geometry.coordinates.length > prev.geometry.coordinates.length) {
+    const prevLen = prev?.geometry.coordinates.length ?? 0;
+    const nextLen = f.geometry.coordinates.length;
+    if (!prev || nextLen > prevLen) {
       best.set(code, f);
+      continue;
+    }
+    if (nextLen === prevLen) {
+      const prevStops = prev.properties.stops?.length ?? 0;
+      const nextStops = f.properties.stops?.length ?? 0;
+      if (nextStops > prevStops) best.set(code, f);
     }
   }
   return [...best.values()];
+}
+
+async function replaceRouteStops(
+  routeId: string,
+  stops: RouteStopSeed[],
+): Promise<void> {
+  await db.execute(sql`
+    DELETE FROM stops WHERE route_id = ${routeId}::uuid
+  `);
+  for (const stop of stops) {
+    await db.execute(sql`
+      INSERT INTO stops (route_id, seq, name, location)
+      SELECT
+        ${routeId}::uuid,
+        ${stop.seq},
+        ${stop.name},
+        ST_ClosestPoint(
+          tr.geometry::geometry,
+          ST_SetSRID(ST_MakePoint(${stop.lng}, ${stop.lat}), 4326)
+        )::geography
+      FROM transit_routes tr
+      WHERE tr.id = ${routeId}::uuid
+    `);
+  }
 }
 
 async function seed(): Promise<void> {
@@ -97,6 +141,8 @@ async function seed(): Promise<void> {
 
   let upserted = 0;
   let skipped = 0;
+  let stopsInserted = 0;
+  let routesWithStops = 0;
 
   for (const f of features) {
     if (f.geometry.coordinates.length < 2) {
@@ -124,6 +170,20 @@ async function seed(): Promise<void> {
               type = EXCLUDED.type,
               geometry = EXCLUDED.geometry
       `);
+
+      const idRes = await db.execute<{ id: string }>(sql`
+        SELECT id FROM transit_routes WHERE code = ${code} LIMIT 1
+      `);
+      const routeId = idRes.rows[0]?.id;
+      const stops = f.properties.stops ?? [];
+      if (routeId) {
+        await replaceRouteStops(routeId, stops);
+        if (stops.length > 0) {
+          routesWithStops++;
+          stopsInserted += stops.length;
+        }
+      }
+
       upserted++;
     } catch (err) {
       skipped++;
@@ -131,7 +191,10 @@ async function seed(): Promise<void> {
     }
   }
 
-  logger.info({ upserted, skipped }, "seed complete");
+  logger.info(
+    { upserted, skipped, routesWithStops, stopsInserted },
+    "seed complete",
+  );
 }
 
 seed()
