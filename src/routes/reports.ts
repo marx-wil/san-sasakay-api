@@ -8,6 +8,7 @@ import {
   PASSENGER_LEVEL,
   REPORT_STATUS,
   ROUTE_STATUS,
+  TRIP_SPEED,
   identityProofs,
   reports,
   users,
@@ -205,6 +206,9 @@ export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
                 crowdLevel: z.enum(CROWD_LEVEL).nullable(),
                 minutesAgo: z.number().int(),
                 passengerId: z.string(),
+                passengerLevel: z.enum(PASSENGER_LEVEL).nullable(),
+                tripSpeed: z.enum(TRIP_SPEED).nullable(),
+                tripIssue: z.enum(PUBLIC_INCIDENTS).nullable(),
               }),
             ),
           }),
@@ -221,24 +225,67 @@ export const reportRoutes: FastifyPluginAsyncZod = async (app) => {
         status: (typeof REPORT_STATUS)[number];
         crowd_level: (typeof CROWD_LEVEL)[number] | null;
         created_at: string;
+        passenger_level: (typeof PASSENGER_LEVEL)[number] | null;
+        trip_speed: (typeof TRIP_SPEED)[number] | null;
+        trip_issue: string | null;
       }>(sql`
-        SELECT r.id, r.user_id, r.status, r.crowd_level, r.created_at
-        FROM reports r
-        WHERE r.route_id = ${routeId}::uuid
-          AND r.created_at >= NOW() - ${windowIntervalSql()}
-        ORDER BY r.created_at DESC
+        WITH windowed AS (
+          SELECT
+            r.id,
+            r.user_id,
+            r.status,
+            r.crowd_level,
+            r.created_at,
+            ${ageMinutesSql(sql.raw("r.created_at"))} AS age_min
+          FROM reports r
+          WHERE r.route_id = ${routeId}::uuid
+            AND r.created_at > NOW() - ${windowIntervalSql()}
+        )
+        SELECT
+          w.id,
+          w.user_id,
+          w.status,
+          w.crowd_level,
+          w.created_at,
+          w.age_min,
+          tf.passenger_level,
+          tf.trip_speed,
+          tf.trip_issue
+        FROM windowed w
+        LEFT JOIN LATERAL (
+          SELECT tf.passenger_level, tf.trip_speed, tf.trip_issue
+          FROM trip_feedback tf
+          WHERE tf.user_id = w.user_id
+            AND tf.route_id = ${routeId}::uuid
+            AND tf.created_at BETWEEN w.created_at - INTERVAL '2 seconds'
+                                  AND w.created_at + INTERVAL '2 seconds'
+          ORDER BY ABS(EXTRACT(EPOCH FROM (tf.created_at - w.created_at)))
+          LIMIT 1
+        ) tf ON TRUE
+        WHERE ${decayFactorSql(sql.raw("w.age_min"))} > 0
+        ORDER BY w.created_at DESC
         LIMIT ${limit}
       `);
 
       const nowMs = Date.now();
+      const publicIncident = new Set<string>(PUBLIC_INCIDENTS);
       return {
-        items: result.rows.map((r) => ({
-          id: r.id,
-          status: r.status,
-          crowdLevel: r.crowd_level,
-          minutesAgo: Math.round((nowMs - new Date(r.created_at).getTime()) / 60_000),
-          passengerId: anonymizeUser(r.user_id),
-        })),
+        items: result.rows.map((r) => {
+          const issue =
+            r.trip_issue && publicIncident.has(r.trip_issue)
+              ? (r.trip_issue as (typeof PUBLIC_INCIDENTS)[number])
+              : null;
+          return {
+            id: r.id,
+            status: r.status,
+            crowdLevel: r.crowd_level,
+            minutesAgo: Math.round((nowMs - new Date(r.created_at).getTime()) / 60_000),
+            passengerId: anonymizeUser(r.user_id),
+            passengerLevel: r.passenger_level,
+            tripSpeed: r.trip_speed,
+            tripIssue: issue,
+          };
+        }),
       };
     },
   );

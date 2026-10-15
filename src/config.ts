@@ -65,6 +65,13 @@ const EnvSchema = z.object({
   // Optional contact email appended to the User-Agent — Nominatim explicitly
   // asks for one. Omit if you've baked it into NOMINATIM_USER_AGENT already.
   NOMINATIM_CONTACT_EMAIL: z.string().email().optional(),
+
+  // TomTom Routing API — traffic-aware ETA for journey preview + live trip.
+  // Omit in dev to return TRAFFIC_UNAVAILABLE (mobile demo mode uses synthetic).
+  TOMTOM_API_KEY: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

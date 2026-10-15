@@ -5,6 +5,8 @@ import { db } from "../db/client.js";
 import { PASSENGER_LEVEL, ROUTE_STATUS, TRANSIT_TYPE } from "../db/schema.js";
 import { NotFound } from "../lib/errors.js";
 import { LATLNG_RE, parseLatLng } from "../lib/latlng.js";
+import { effectiveReportCount, isLastReportFresh } from "../lib/report-window.js";
+import { journeyEstimateRoutes } from "./journey-estimate.js";
 
 const RouteSummary = z.object({
   id: z.string().uuid(),
@@ -50,6 +52,8 @@ const MIN_NEAR_RADIUS_M = 50;
 const MAX_NEAR_RADIUS_M = 2000;
 
 export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
+  await app.register(journeyEstimateRoutes);
+
   // GET /routes — list routes for the map and the search sheet.
   //
   // Query params (all optional):
@@ -209,19 +213,24 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
         LIMIT 500
       `);
 
+      const nowMs = Date.now();
       return {
-        items: result.rows.map((r) => ({
-          id: r.id,
-          code: r.code,
-          name: r.name,
-          type: r.type,
-          status: r.status,
-          confidence: r.confidence,
-          reportCount: r.report_count,
-          lastReportAt: r.last_report_at ? new Date(r.last_report_at).toISOString() : null,
-          passengerLevel: r.passenger_level,
-          ...(includeGeom ? { geometry: r.geometry ? JSON.parse(r.geometry) : null } : {}),
-        })),
+        items: result.rows.map((r) => {
+          const lastReportAt = r.last_report_at ? new Date(r.last_report_at).toISOString() : null;
+          const fresh = isLastReportFresh(r.last_report_at, nowMs);
+          return {
+            id: r.id,
+            code: r.code,
+            name: r.name,
+            type: r.type,
+            status: fresh ? r.status : "hindi_alam",
+            confidence: fresh ? r.confidence : 0,
+            reportCount: effectiveReportCount(r.report_count, r.last_report_at, nowMs),
+            lastReportAt,
+            passengerLevel: fresh ? r.passenger_level : null,
+            ...(includeGeom ? { geometry: r.geometry ? JSON.parse(r.geometry) : null } : {}),
+          };
+        }),
       };
     },
   );
@@ -282,16 +291,20 @@ export const transitRouteRoutes: FastifyPluginAsyncZod = async (app) => {
         ORDER BY seq ASC
       `);
 
+      const nowMs = Date.now();
+      const lastReportAt = row.last_report_at ? new Date(row.last_report_at).toISOString() : null;
+      const fresh = isLastReportFresh(row.last_report_at, nowMs);
+
       return {
         id: row.id,
         code: row.code,
         name: row.name,
         type: row.type,
-        status: row.status,
-        confidence: row.confidence,
-        reportCount: row.report_count,
-        lastReportAt: row.last_report_at ? new Date(row.last_report_at).toISOString() : null,
-        passengerLevel: row.passenger_level,
+        status: fresh ? row.status : "hindi_alam",
+        confidence: fresh ? row.confidence : 0,
+        reportCount: effectiveReportCount(row.report_count, row.last_report_at, nowMs),
+        lastReportAt,
+        passengerLevel: fresh ? row.passenger_level : null,
         geometry: row.geometry ? JSON.parse(row.geometry) : null,
         stops: stopsRes.rows.map((s) => ({
           id: s.id,

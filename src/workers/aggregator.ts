@@ -100,14 +100,16 @@ export async function runAggregatorOnce(): Promise<{ touchedRoutes: number }> {
     RETURNING route_id
   `);
 
-  // Flip stale routes to 'hindi_alam'.
+  // Flip stale routes to 'hindi_alam'. Zero report_count so list/card
+  // freshness matches the window; keep last_report_at for "last known" copy.
   await db.execute(sql`
     UPDATE route_status
     SET status = 'hindi_alam',
         confidence = 0,
+        report_count = 0,
         updated_at = NOW()
-    WHERE status <> 'hindi_alam'
-      AND (last_report_at IS NULL OR last_report_at < NOW() - ${windowIntervalSql()})
+    WHERE last_report_at IS NULL
+       OR last_report_at < NOW() - ${windowIntervalSql()}
   `);
 
   // Aggregate passenger_level from trip_feedback in the same window.

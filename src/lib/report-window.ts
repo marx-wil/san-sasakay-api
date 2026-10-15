@@ -78,3 +78,27 @@ export function previousWindowIntervalSql() {
  * before agreement alone can produce full confidence.
  */
 export const CONFIDENCE_SATURATION_REPORTS = 8;
+
+/** True when `lastReportAt` falls inside the public freshness window. */
+export function isLastReportFresh(
+  lastReportAt: Date | string | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (!lastReportAt) return false;
+  const t =
+    typeof lastReportAt === "string" ? Date.parse(lastReportAt) : lastReportAt.getTime();
+  if (Number.isNaN(t)) return false;
+  return nowMs - t <= WINDOW_MINUTES * 60_000;
+}
+
+/**
+ * Report count exposed on GET /routes when `route_status` may lag the worker.
+ * Outside the window we publish 0 while keeping `lastReportAt` for honesty copy.
+ */
+export function effectiveReportCount(
+  reportCount: number,
+  lastReportAt: Date | string | null | undefined,
+  nowMs = Date.now(),
+): number {
+  return isLastReportFresh(lastReportAt, nowMs) ? reportCount : 0;
+}

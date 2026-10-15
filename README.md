@@ -379,6 +379,7 @@ OpenAPI-style validation. Summary:
 | GET | `/reports/me` | JWT | Recent reports for current user |
 | GET | `/routes?bbox=...&type=...` | none | Routes intersecting a bbox |
 | GET | `/routes/:id` | none | Full route detail + stops |
+| GET | `/routes/:id/journey-estimate?origin=lat,lng&dest=lat,lng` | none | Traffic-aware ETA + segment levels (TomTom; 90s cache) |
 | WS | `/ws` | none (token in next phase) | Subscribe to live route status |
 
 ### Public vs authenticated routes (the guest-mode contract)
@@ -388,7 +389,7 @@ still see routes and live status. Anything that is per-user — saved
 routes, points/rewards, profile — sits behind `JWT`. The split:
 
 - **Public** (no JWT, work in guest mode): `/health`, `/ready`,
-  `/routes`, `/routes/:id`, `/auth/*`, `/ws`.
+  `/routes`, `/routes/:id`, `/routes/:id/journey-estimate`, `/auth/*`, `/ws`.
 - **Authenticated** (JWT required, surfaced as locked features in the
   client): `/me`, `/me/phone`, `/reports`, `/reports/me`.
 
