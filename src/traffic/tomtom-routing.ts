@@ -240,12 +240,14 @@ export async function calculateRouteWithTraffic(
   const { origin, dest, supportingPoints, apiKey } = input;
 
   const locs = `${origin.lat},${origin.lng}:${dest.lat},${dest.lng}`;
+  // Default routeRepresentation is polyline. "none" is only valid with
+  // computeBestOrder=true and makes supportingPoints POSTs fail with BAD_INPUT.
   const qs = new URLSearchParams({
     key: apiKey,
     traffic: "true",
     sectionType: "traffic",
     travelMode: "car",
-    routeRepresentation: "none",
+    routeRepresentation: "polyline",
   });
   const url = `https://api.tomtom.com/routing/1/calculateRoute/${locs}/json?${qs}`;
 
