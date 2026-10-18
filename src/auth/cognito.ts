@@ -2,8 +2,8 @@ import {
   CognitoIdentityProviderClient,
   ConfirmSignUpCommand,
   InitiateAuthCommand,
-  SignUpCommand,
   type InitiateAuthCommandOutput,
+  SignUpCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { decodeJwt } from "jose";
 import { env, isCognitoEnabled } from "../config.js";
@@ -13,12 +13,26 @@ let client: CognitoIdentityProviderClient | null = null;
 
 function getClient(): CognitoIdentityProviderClient {
   if (!isCognitoEnabled) {
-    throw BadRequest("COGNITO_NOT_CONFIGURED", "Password sign-in is not available in this environment");
+    throw BadRequest(
+      "COGNITO_NOT_CONFIGURED",
+      "Password sign-in is not available in this environment",
+    );
   }
   if (!client) {
     client = new CognitoIdentityProviderClient({ region: env.AWS_REGION });
   }
   return client;
+}
+
+function getClientId(): string {
+  const clientId = env.COGNITO_CLIENT_ID;
+  if (!clientId) {
+    throw BadRequest(
+      "COGNITO_NOT_CONFIGURED",
+      "Password sign-in is not available in this environment",
+    );
+  }
+  return clientId;
 }
 
 export type CognitoIdentity = {
@@ -61,7 +75,10 @@ function mapCognitoError(err: unknown): never {
     case "UserNotFoundException":
       throw Unauthorized("INVALID_CREDENTIALS", "Mali ang email o password");
     case "UserNotConfirmedException":
-      throw BadRequest("CONFIRMATION_REQUIRED", "I-verify muna ang email mo gamit ang code na ipinadala namin");
+      throw BadRequest(
+        "CONFIRMATION_REQUIRED",
+        "I-verify muna ang email mo gamit ang code na ipinadala namin",
+      );
     case "InvalidPasswordException":
       throw BadRequest("VALIDATION_ERROR", message);
     case "CodeMismatchException":
@@ -94,7 +111,7 @@ export async function cognitoSignUp(opts: {
 
     const out = await getClient().send(
       new SignUpCommand({
-        ClientId: env.COGNITO_CLIENT_ID!,
+        ClientId: getClientId(),
         Username: opts.email,
         Password: opts.password,
         UserAttributes: userAttributes,
@@ -110,7 +127,7 @@ export async function cognitoConfirmSignUp(email: string, code: string): Promise
   try {
     await getClient().send(
       new ConfirmSignUpCommand({
-        ClientId: env.COGNITO_CLIENT_ID!,
+        ClientId: getClientId(),
         Username: email,
         ConfirmationCode: code,
       }),
@@ -129,7 +146,7 @@ export async function cognitoPasswordLogin(
     out = await getClient().send(
       new InitiateAuthCommand({
         AuthFlow: "USER_PASSWORD_AUTH",
-        ClientId: env.COGNITO_CLIENT_ID!,
+        ClientId: getClientId(),
         AuthParameters: {
           USERNAME: email,
           PASSWORD: password,

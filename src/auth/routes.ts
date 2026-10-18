@@ -6,7 +6,13 @@ import { db } from "../db/client.js";
 import { magicLinkTokens } from "../db/schema.js";
 import { BadRequest, Unauthorized } from "../lib/errors.js";
 import { cognitoConfirmSignUp, cognitoPasswordLogin, cognitoSignUp } from "./cognito.js";
-import { normalizePhPhone, generateMagicToken, hashIdentifier, hashToken, sendMagicLink } from "./magic-link.js";
+import {
+  generateMagicToken,
+  hashIdentifier,
+  hashToken,
+  normalizePhPhone,
+  sendMagicLink,
+} from "./magic-link.js";
 import { issueSessionForEmail } from "./session.js";
 import { findOrCreateUserByEmailHash, stampEarlyAdopter, touchLastSeen } from "./users.js";
 

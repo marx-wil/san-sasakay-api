@@ -91,7 +91,11 @@ export async function findOrCreateUserByEmailHash(
     isPrimary: 1,
   });
 
-  return { userId: created.id, displayName: composeDisplayName(opts?.firstName, opts?.lastName, null), hasPhone: false };
+  return {
+    userId: created.id,
+    displayName: composeDisplayName(opts?.firstName, opts?.lastName, null),
+    hasPhone: false,
+  };
 }
 
 export async function stampEarlyAdopter(userId: string, emailHash: string): Promise<void> {
@@ -109,7 +113,10 @@ export async function touchLastSeen(userId: string): Promise<void> {
   await db.update(users).set({ lastSeenAt: new Date() }).where(eq(users.id, userId));
 }
 
-export async function attachPhoneIfProvided(userId: string, rawPhone: string | undefined): Promise<boolean> {
+export async function attachPhoneIfProvided(
+  userId: string,
+  rawPhone: string | undefined,
+): Promise<boolean> {
   if (!rawPhone || rawPhone.trim().length === 0) return false;
 
   const { normalizePhPhone } = await import("./magic-link.js");
@@ -117,10 +124,7 @@ export async function attachPhoneIfProvided(userId: string, rawPhone: string | u
   try {
     normalized = normalizePhPhone(rawPhone);
   } catch {
-    throw BadRequest(
-      "INVALID_PHONE",
-      "Phone must be a valid PH mobile number (e.g. 09171234567)",
-    );
+    throw BadRequest("INVALID_PHONE", "Phone must be a valid PH mobile number (e.g. 09171234567)");
   }
   const phoneHash = hashIdentifier(normalized);
 

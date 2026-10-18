@@ -47,8 +47,7 @@ export async function sendWaitlistConfirmation(email: string, position?: number)
   // Hidden preheader text — what most inbox previews show beside the
   // subject line. Padded with whitespace so the client doesn't trail
   // it with the visible body text.
-  const preheader =
-    "Salamat. Maagang access sa verified route planner bago ang public launch.";
+  const preheader = "Salamat. Maagang access sa verified route planner bago ang public launch.";
 
   const html = `<!doctype html>
 <html lang="tl">

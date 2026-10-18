@@ -2,8 +2,8 @@ import { sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { hashIdentifier } from "../auth/magic-link.js";
-import { db } from "../db/client.js";
 import { isDev } from "../config.js";
+import { db } from "../db/client.js";
 import { Conflict } from "../lib/errors.js";
 import { sendWaitlistConfirmation } from "../lib/waitlist-email.js";
 

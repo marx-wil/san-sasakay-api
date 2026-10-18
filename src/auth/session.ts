@@ -31,7 +31,11 @@ export async function issueSessionForEmail(
   const normalizedEmail = opts.email.trim().toLowerCase();
   const emailHash = hashIdentifier(normalizedEmail);
 
-  const { userId, displayName, hasPhone: hadPhone } = await findOrCreateUserByEmailHash(emailHash, {
+  const {
+    userId,
+    displayName,
+    hasPhone: hadPhone,
+  } = await findOrCreateUserByEmailHash(emailHash, {
     firstName: opts.firstName,
     lastName: opts.lastName,
   });
