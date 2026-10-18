@@ -169,6 +169,19 @@ data "aws_iam_policy_document" "instance_inline" {
     actions   = ["ses:SendEmail", "ses:SendRawEmail"]
     resources = ["*"]
   }
+  statement {
+    sid = "CognitoAuth"
+    actions = [
+      "cognito-idp:SignUp",
+      "cognito-idp:ConfirmSignUp",
+      "cognito-idp:InitiateAuth",
+      "cognito-idp:RespondToAuthChallenge",
+      "cognito-idp:ForgotPassword",
+      "cognito-idp:ConfirmForgotPassword",
+      "cognito-idp:AdminGetUser",
+    ]
+    resources = [aws_cognito_user_pool.commuters.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "instance_inline" {
@@ -237,6 +250,8 @@ resource "aws_instance" "api" {
     # Falls back to the apex domain when not explicitly set, so a deploy
     # with just `domain_name` set keeps working.
     public_web_url = var.public_web_url != "" ? var.public_web_url : (var.domain_name == "" ? "" : "https://${var.domain_name}")
+    cognito_user_pool_id = aws_cognito_user_pool.commuters.id
+    cognito_client_id    = aws_cognito_user_pool_client.mobile.id
   })
 
   tags = {

@@ -47,6 +47,16 @@ const EnvSchema = z.object({
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
 
+  /** Cognito user pool for email+password auth. Omit in local dev to use magic-link only. */
+  COGNITO_USER_POOL_ID: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
+  COGNITO_CLIENT_ID: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
+
   S3_BACKUP_BUCKET: z.string().optional(),
 
   AGGREGATOR_TICK_SECONDS: z.coerce.number().int().positive().default(10),
@@ -86,3 +96,4 @@ if (!parsed.success) {
 export const env: Env = parsed.data;
 export const isProd = env.NODE_ENV === "production";
 export const isDev = env.NODE_ENV === "development";
+export const isCognitoEnabled = Boolean(env.COGNITO_USER_POOL_ID && env.COGNITO_CLIENT_ID);

@@ -44,3 +44,13 @@ output "github_deploy_role_arn" {
   value       = aws_iam_role.github_deploy.arn
   description = "Copy into the GitHub repo secret AWS_DEPLOY_ROLE_ARN."
 }
+
+output "cognito_user_pool_id" {
+  value       = aws_cognito_user_pool.commuters.id
+  description = "Set COGNITO_USER_POOL_ID on the API host."
+}
+
+output "cognito_client_id" {
+  value       = aws_cognito_user_pool_client.mobile.id
+  description = "Set COGNITO_CLIENT_ID on the API host."
+}

@@ -23,6 +23,9 @@ x-app-env: &app-env
   JWT_ISSUER: sakay-api
   JWT_TTL_SECONDS: "2592000"
   MAGIC_LINK_TTL_SECONDS: "600"
+  # Same pool as prod; optional for local password auth when using docker compose.
+  COGNITO_USER_POOL_ID: ap-southeast-1_usePFv8rF
+  COGNITO_CLIENT_ID: 3vc5cveq9jma0llbd071t261b7
   ACCOUNT_DELETION_TOKEN_TTL_SECONDS: "604800"
   EMAIL_PROVIDER: mailpit
   EMAIL_FROM: "San Sasakay <no-reply@sansasakay.dev>"

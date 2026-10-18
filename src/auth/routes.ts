@@ -1,11 +1,14 @@
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { env } from "../config.js";
 import { db } from "../db/client.js";
-import { identityProofs, magicLinkTokens, users } from "../db/schema.js";
+import { magicLinkTokens } from "../db/schema.js";
 import { BadRequest, Unauthorized } from "../lib/errors.js";
-import { generateMagicToken, hashIdentifier, hashToken, sendMagicLink } from "./magic-link.js";
+import { cognitoConfirmSignUp, cognitoPasswordLogin, cognitoSignUp } from "./cognito.js";
+import { normalizePhPhone, generateMagicToken, hashIdentifier, hashToken, sendMagicLink } from "./magic-link.js";
+import { issueSessionForEmail } from "./session.js";
+import { findOrCreateUserByEmailHash, stampEarlyAdopter, touchLastSeen } from "./users.js";
 
 // #region agent log
 // Debug instrumentation. Container reaches host loopback via host.docker.internal.
@@ -66,6 +69,54 @@ const StatusBody = z.object({
 
 const StatusResponse = z.object({
   status: z.enum(["valid", "expired", "used", "invalid"]),
+});
+
+const PasswordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .max(128)
+  .regex(/[a-z]/, "Password must include a lowercase letter")
+  .regex(/[A-Z]/, "Password must include an uppercase letter")
+  .regex(/[0-9]/, "Password must include a number");
+
+const LoginBody = z.object({
+  email: z.string().email().max(254),
+  password: z.string().min(1).max(128),
+});
+
+const SignUpBody = z
+  .object({
+    firstName: z.string().trim().min(1).max(80),
+    lastName: z.string().trim().min(1).max(80),
+    email: z.string().email().max(254),
+    password: PasswordSchema,
+    passwordConfirm: z.string().min(1).max(128),
+    phone: z.string().max(32).optional(),
+  })
+  .refine((b) => b.password === b.passwordConfirm, {
+    message: "Passwords do not match",
+    path: ["passwordConfirm"],
+  });
+
+const ConfirmBody = z.object({
+  email: z.string().email().max(254),
+  code: z.string().trim().min(6).max(6),
+  firstName: z.string().trim().min(1).max(80).optional(),
+  lastName: z.string().trim().min(1).max(80).optional(),
+  phone: z.string().max(32).optional(),
+});
+
+const SessionResponse = z.object({
+  token: z.string().optional(),
+  confirmationRequired: z.literal(true).optional(),
+  user: z
+    .object({
+      id: z.string().uuid(),
+      displayName: z.string().nullable(),
+      hasPhone: z.boolean(),
+      phoneRequired: z.boolean(),
+    })
+    .optional(),
 });
 
 export const authRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -166,6 +217,103 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
+  // POST /auth/login — email + password via Cognito, then issue app JWT.
+  app.post(
+    "/login",
+    {
+      schema: {
+        tags: ["auth"],
+        body: LoginBody,
+        response: { 200: SessionResponse },
+      },
+      config: {
+        rateLimit: { max: 10, timeWindow: "15 minutes" },
+      },
+    },
+    async (req) => {
+      const email = req.body.email.trim().toLowerCase();
+      const identity = await cognitoPasswordLogin(email, req.body.password);
+      return issueSessionForEmail(app, {
+        email: identity.email,
+        firstName: identity.firstName,
+        lastName: identity.lastName,
+      });
+    },
+  );
+
+  // POST /auth/signup — register in Cognito + sync profile to sakay DB.
+  app.post(
+    "/signup",
+    {
+      schema: {
+        tags: ["auth"],
+        body: SignUpBody,
+        response: { 200: SessionResponse },
+      },
+      config: {
+        rateLimit: { max: 5, timeWindow: "1 hour" },
+      },
+    },
+    async (req) => {
+      const email = req.body.email.trim().toLowerCase();
+      let phoneE164: string | undefined;
+      if (req.body.phone && req.body.phone.trim().length > 0) {
+        try {
+          phoneE164 = normalizePhPhone(req.body.phone);
+        } catch {
+          throw BadRequest(
+            "INVALID_PHONE",
+            "Phone must be a valid PH mobile number (e.g. 09171234567)",
+          );
+        }
+      }
+
+      const { userConfirmed } = await cognitoSignUp({
+        email,
+        password: req.body.password,
+        firstName: req.body.firstName,
+        lastName: req.body.lastName,
+        phoneE164,
+      });
+
+      if (!userConfirmed) {
+        return { confirmationRequired: true as const };
+      }
+
+      return issueSessionForEmail(app, {
+        email,
+        firstName: req.body.firstName,
+        lastName: req.body.lastName,
+        phone: req.body.phone,
+      });
+    },
+  );
+
+  // POST /auth/confirm — verify Cognito email code after signup.
+  app.post(
+    "/confirm",
+    {
+      schema: {
+        tags: ["auth"],
+        body: ConfirmBody,
+        response: { 200: SessionResponse },
+      },
+      config: {
+        rateLimit: { max: 10, timeWindow: "15 minutes" },
+      },
+    },
+    async (req) => {
+      const email = req.body.email.trim().toLowerCase();
+      await cognitoConfirmSignUp(email, req.body.code);
+      return issueSessionForEmail(app, {
+        email,
+        firstName: req.body.firstName,
+        lastName: req.body.lastName,
+        phone: req.body.phone,
+      });
+    },
+  );
+
   // POST /auth/status — read-only peek for the landing /auth/verify page.
   // Does not consume the token, create a user, or issue a JWT. The landing
   // uses this to refuse deep-linking expired/used links into the app.
@@ -257,19 +405,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const { userId, displayName, hasPhone } = await findOrCreateUserByEmailHash(row.emailHash);
 
-      // If this email is on the pre-launch waitlist, stamp the user as an
-      // early adopter the first time they sign in. Idempotent: the WHERE
-      // clause only fires when early_adopter_at is currently NULL, so the
-      // timestamp captures the actual first-sign-in moment, not later
-      // re-verifications. The mobile app reads this off /me.
-      await db.execute(sql`
-        UPDATE users SET early_adopter_at = NOW()
-        WHERE id = ${userId}::uuid
-          AND early_adopter_at IS NULL
-          AND EXISTS (
-            SELECT 1 FROM waitlist_signups WHERE email_hash = ${row.emailHash}
-          )
-      `);
+      await stampEarlyAdopter(userId, row.emailHash);
 
       // Mark token used (single-use). Done after user resolution so a DB
       // failure during user creation doesn't burn the token.
@@ -278,8 +414,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         .set({ usedAt: now, userId })
         .where(eq(magicLinkTokens.tokenHash, tokenHash));
 
-      // Touch last_seen_at — cheap and useful for active-user counts.
-      await db.update(users).set({ lastSeenAt: now }).where(eq(users.id, userId));
+      await touchLastSeen(userId);
 
       const accessToken = app.jwt.sign({ sub: userId });
 
@@ -299,79 +434,3 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   );
 };
-
-/**
- * Signup-on-verify: if no user has this email proof yet, create one.
- * Returned `hasPhone` lets the client decide whether to prompt for phone
- * post-auth without making a second round-trip.
- */
-async function findOrCreateUserByEmailHash(emailHash: string): Promise<{
-  userId: string;
-  displayName: string | null;
-  hasPhone: boolean;
-}> {
-  const now = new Date();
-
-  const [existing] = await db
-    .select({ userId: identityProofs.userId })
-    .from(identityProofs)
-    .where(and(eq(identityProofs.provider, "email"), eq(identityProofs.identifierHash, emailHash)))
-    .limit(1);
-
-  if (existing) {
-    const [u] = await db
-      .select({
-        id: users.id,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        displayName: users.displayName,
-      })
-      .from(users)
-      .where(eq(users.id, existing.userId))
-      .limit(1);
-
-    const [phoneProof] = await db
-      .select({ userId: identityProofs.userId })
-      .from(identityProofs)
-      .where(and(eq(identityProofs.userId, existing.userId), eq(identityProofs.provider, "phone")))
-      .limit(1);
-
-    return {
-      userId: existing.userId,
-      displayName: composeDisplayName(u?.firstName, u?.lastName, u?.displayName),
-      hasPhone: !!phoneProof,
-    };
-  }
-
-  const [created] = await db.insert(users).values({}).returning({
-    id: users.id,
-  });
-  if (!created) throw BadRequest("USER_CREATE_FAILED", "Could not create user");
-
-  await db.insert(identityProofs).values({
-    userId: created.id,
-    provider: "email",
-    identifierHash: emailHash,
-    verifiedAt: now,
-    isPrimary: 1,
-  });
-
-  // A freshly-created user has no name yet; the client will route to the
-  // post-auth setup screen which collects firstName + lastName via PATCH /me.
-  return { userId: created.id, displayName: null, hasPhone: false };
-}
-
-/**
- * Same composition rule as the /me payload — keep the two in lockstep.
- * Prefer structured first/last; fall back to any legacy display_name we
- * haven't re-prompted (post-migration, pre-edit rows).
- */
-function composeDisplayName(
-  firstName: string | null | undefined,
-  lastName: string | null | undefined,
-  legacyDisplayName: string | null | undefined,
-): string | null {
-  const composed = [firstName, lastName].filter((s) => s && s.length > 0).join(" ");
-  if (composed.length > 0) return composed;
-  return legacyDisplayName ?? null;
-}

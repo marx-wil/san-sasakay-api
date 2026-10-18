@@ -89,6 +89,8 @@ S3_BACKUP_BUCKET=${s3_backup_bucket}
 AGGREGATOR_TICK_SECONDS=10
 REPORT_DECAY_START_MINUTES=30
 REPORT_EXPIRY_MINUTES=45
+COGNITO_USER_POOL_ID=${cognito_user_pool_id}
+COGNITO_CLIENT_ID=${cognito_client_id}
 EOF
 chmod 0640 /opt/sakay/.env
 
