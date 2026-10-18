@@ -179,6 +179,9 @@ data "aws_iam_policy_document" "instance_inline" {
       "cognito-idp:ForgotPassword",
       "cognito-idp:ConfirmForgotPassword",
       "cognito-idp:AdminGetUser",
+      "cognito-idp:AdminCreateUser",
+      "cognito-idp:AdminSetUserPassword",
+      "cognito-idp:AdminDeleteUser",
     ]
     resources = [aws_cognito_user_pool.commuters.arn]
   }

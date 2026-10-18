@@ -28,6 +28,8 @@ const EnvSchema = z.object({
     .default(60 * 60 * 24 * 30),
 
   MAGIC_LINK_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+  /** Email OTP for password signup (pending until /auth/confirm). */
+  SIGNUP_OTP_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
 
   // Public web account-deletion confirm links (separate from auth magic links).
   ACCOUNT_DELETION_TOKEN_TTL_SECONDS: z.coerce

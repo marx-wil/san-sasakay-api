@@ -1,8 +1,13 @@
 import {
+  AdminCreateUserCommand,
+  AdminDeleteUserCommand,
+  AdminGetUserCommand,
+  AdminSetUserPasswordCommand,
   CognitoIdentityProviderClient,
   ConfirmSignUpCommand,
   InitiateAuthCommand,
   type InitiateAuthCommandOutput,
+  MessageActionType,
   SignUpCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { decodeJwt } from "jose";
@@ -33,6 +38,17 @@ function getClientId(): string {
     );
   }
   return clientId;
+}
+
+function getUserPoolId(): string {
+  const poolId = env.COGNITO_USER_POOL_ID;
+  if (!poolId) {
+    throw BadRequest(
+      "COGNITO_NOT_CONFIGURED",
+      "Password sign-in is not available in this environment",
+    );
+  }
+  return poolId;
 }
 
 export type CognitoIdentity = {
@@ -130,6 +146,84 @@ export async function cognitoConfirmSignUp(email: string, code: string): Promise
         ClientId: getClientId(),
         Username: email,
         ConfirmationCode: code,
+      }),
+    );
+  } catch (err) {
+    mapCognitoError(err);
+  }
+}
+
+export type CognitoUserStatus = "CONFIRMED" | "UNCONFIRMED" | "NOT_FOUND";
+
+export async function cognitoGetUserStatus(email: string): Promise<CognitoUserStatus> {
+  try {
+    const out = await getClient().send(
+      new AdminGetUserCommand({
+        UserPoolId: getUserPoolId(),
+        Username: email,
+      }),
+    );
+    if (out.UserStatus === "CONFIRMED") return "CONFIRMED";
+    return "UNCONFIRMED";
+  } catch (err) {
+    const name = (err as { name?: string })?.name ?? "";
+    if (name === "UserNotFoundException") return "NOT_FOUND";
+    mapCognitoError(err);
+  }
+}
+
+export async function cognitoDeleteUser(email: string): Promise<void> {
+  try {
+    await getClient().send(
+      new AdminDeleteUserCommand({
+        UserPoolId: getUserPoolId(),
+        Username: email,
+      }),
+    );
+  } catch (err) {
+    const name = (err as { name?: string })?.name ?? "";
+    if (name === "UserNotFoundException") return;
+    mapCognitoError(err);
+  }
+}
+
+/**
+ * Create a confirmed Cognito user after our email OTP passed. Suppresses Cognito's
+ * own verification email — the app already verified the address.
+ */
+export async function cognitoCreateConfirmedUser(opts: {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  phoneE164?: string;
+}): Promise<void> {
+  const userAttributes = [
+    { Name: "email", Value: opts.email },
+    { Name: "email_verified", Value: "true" },
+    { Name: "given_name", Value: opts.firstName },
+    { Name: "family_name", Value: opts.lastName },
+  ];
+  if (opts.phoneE164) {
+    userAttributes.push({ Name: "phone_number", Value: opts.phoneE164 });
+  }
+
+  try {
+    await getClient().send(
+      new AdminCreateUserCommand({
+        UserPoolId: getUserPoolId(),
+        Username: opts.email,
+        MessageAction: MessageActionType.SUPPRESS,
+        TemporaryPassword: opts.password,
+        UserAttributes: userAttributes,
+      }),
+    );
+    await getClient().send(
+      new AdminSetUserPasswordCommand({
+        UserPoolId: getUserPoolId(),
+        Username: opts.email,
+        Password: opts.password,
+        Permanent: true,
       }),
     );
   } catch (err) {

@@ -184,6 +184,26 @@ export const accountDeletionTokens = pgTable(
   }),
 );
 
+// ─── pending_signups ────────────────────────────────────────────────────────
+// Email+password signup before Cognito user exists. OTP verified via /auth/confirm.
+export const pendingSignups = pgTable(
+  "pending_signups",
+  {
+    emailHash: text("email_hash").primaryKey(),
+    codeHash: text("code_hash").notNull(),
+    passwordCiphertext: text("password_ciphertext").notNull(),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    phoneE164: text("phone_e164"),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    expiresIdx: index("pending_signups_expires_idx").on(t.expiresAt),
+  }),
+);
+
 // ─── transit_routes ─────────────────────────────────────────────────────────
 export const transitRoutes = pgTable(
   "transit_routes",

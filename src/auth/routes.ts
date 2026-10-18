@@ -1,11 +1,17 @@
 import { and, eq, gt, isNull } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { env } from "../config.js";
+import { env, isCognitoEnabled } from "../config.js";
 import { db } from "../db/client.js";
 import { magicLinkTokens } from "../db/schema.js";
 import { BadRequest, Unauthorized } from "../lib/errors.js";
-import { cognitoConfirmSignUp, cognitoPasswordLogin, cognitoSignUp } from "./cognito.js";
+import {
+  cognitoCreateConfirmedUser,
+  cognitoDeleteUser,
+  cognitoGetUserStatus,
+  cognitoPasswordLogin,
+} from "./cognito.js";
+import { sendSignupOtp, storePendingSignup, verifyPendingSignup } from "./signup-otp.js";
 import {
   generateMagicToken,
   hashIdentifier,
@@ -15,34 +21,6 @@ import {
 } from "./magic-link.js";
 import { issueSessionForEmail } from "./session.js";
 import { findOrCreateUserByEmailHash, stampEarlyAdopter, touchLastSeen } from "./users.js";
-
-// #region agent log
-// Debug instrumentation. Container reaches host loopback via host.docker.internal.
-function dlog(payload: {
-  location: string;
-  message: string;
-  data?: Record<string, unknown>;
-  hypothesisId?: string;
-}): void {
-  try {
-    fetch("http://host.docker.internal:7652/ingest/12fcec5a-657d-4abd-b83d-ebfbba60b53a", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "1b02c8",
-      },
-      body: JSON.stringify({
-        sessionId: "1b02c8",
-        location: payload.location,
-        message: payload.message,
-        data: payload.data ?? {},
-        hypothesisId: payload.hypothesisId,
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-  } catch {}
-}
-// #endregion
 
 const RequestBody = z.object({
   email: z.string().email().max(254),
@@ -145,14 +123,6 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req, reply) => {
-      // #region agent log
-      dlog({
-        location: "auth/routes.ts:/auth/request",
-        message: "handler entered",
-        data: { ip: req.ip, ua: req.headers["user-agent"]?.slice(0, 80) },
-        hypothesisId: "A,B,C",
-      });
-      // #endregion
       const { email } = req.body;
       const emailHash = hashIdentifier(email);
 
@@ -166,22 +136,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
           emailHash,
           expiresAt,
         });
-        // #region agent log
-        dlog({
-          location: "auth/routes.ts:/auth/request",
-          message: "magic-link row inserted",
-          hypothesisId: "C",
-        });
-        // #endregion
       } catch (err) {
-        // #region agent log
-        dlog({
-          location: "auth/routes.ts:/auth/request",
-          message: "magic-link insert threw",
-          data: { errMessage: (err as Error)?.message ?? String(err) },
-          hypothesisId: "C",
-        });
-        // #endregion
         throw err;
       }
 
@@ -195,25 +150,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
 
       try {
         await sendMagicLink(email, link);
-        // #region agent log
-        dlog({
-          location: "auth/routes.ts:/auth/request",
-          message: "sendMagicLink resolved (mailpit accepted)",
-          hypothesisId: "D",
-        });
-        // #endregion
       } catch (err) {
-        // #region agent log
-        dlog({
-          location: "auth/routes.ts:/auth/request",
-          message: "sendMagicLink threw",
-          data: {
-            errMessage: (err as Error)?.message ?? String(err),
-            smtpHost: env.SMTP_HOST,
-          },
-          hypothesisId: "D",
-        });
-        // #endregion
         // Don't leak send failures to the client. Log + still return 202.
         req.log.error({ err }, "magic-link send failed");
       }
@@ -247,7 +184,8 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
-  // POST /auth/signup — register in Cognito + sync profile to sakay DB.
+  // POST /auth/signup — queue signup + email OTP. Cognito user is created only
+  // after /auth/confirm verifies the code.
   app.post(
     "/signup",
     {
@@ -260,8 +198,16 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         rateLimit: { max: 5, timeWindow: "1 hour" },
       },
     },
-    async (req) => {
+    async (req, reply) => {
+      if (!isCognitoEnabled) {
+        throw BadRequest(
+          "COGNITO_NOT_CONFIGURED",
+          "Password sign-in is not available in this environment",
+        );
+      }
+
       const email = req.body.email.trim().toLowerCase();
+      const emailHash = hashIdentifier(email);
       let phoneE164: string | undefined;
       if (req.body.phone && req.body.phone.trim().length > 0) {
         try {
@@ -274,7 +220,15 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         }
       }
 
-      const { userConfirmed } = await cognitoSignUp({
+      const existing = await cognitoGetUserStatus(email);
+      if (existing === "CONFIRMED") {
+        throw BadRequest("USER_EXISTS", "An account with this email already exists");
+      }
+      if (existing === "UNCONFIRMED") {
+        await cognitoDeleteUser(email);
+      }
+
+      const otp = await storePendingSignup(emailHash, {
         email,
         password: req.body.password,
         firstName: req.body.firstName,
@@ -282,20 +236,19 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         phoneE164,
       });
 
-      if (!userConfirmed) {
-        return { confirmationRequired: true as const };
+      try {
+        await sendSignupOtp(email, otp);
+      } catch (err) {
+        req.log.error({ err }, "signup-otp send failed");
+        throw BadRequest("AUTH_FAILED", "Hindi maipadala ang verification code. Subukan ulit.");
       }
 
-      return issueSessionForEmail(app, {
-        email,
-        firstName: req.body.firstName,
-        lastName: req.body.lastName,
-        phone: req.body.phone,
-      });
+      reply.code(200);
+      return { confirmationRequired: true as const };
     },
   );
 
-  // POST /auth/confirm — verify Cognito email code after signup.
+  // POST /auth/confirm — verify email OTP, create Cognito user, issue app JWT.
   app.post(
     "/confirm",
     {
@@ -309,13 +262,38 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (req) => {
+      if (!isCognitoEnabled) {
+        throw BadRequest(
+          "COGNITO_NOT_CONFIGURED",
+          "Password sign-in is not available in this environment",
+        );
+      }
+
       const email = req.body.email.trim().toLowerCase();
-      await cognitoConfirmSignUp(email, req.body.code);
+      const emailHash = hashIdentifier(email);
+      const pending = await verifyPendingSignup(emailHash, req.body.code);
+
+      const firstName = req.body.firstName ?? pending.firstName;
+      const lastName = req.body.lastName ?? pending.lastName;
+
+      await cognitoCreateConfirmedUser({
+        email,
+        password: pending.password,
+        firstName,
+        lastName,
+        phoneE164: pending.phoneE164,
+      });
+
+      const phoneForDb =
+        req.body.phone && req.body.phone.trim().length > 0
+          ? req.body.phone
+          : pending.phoneE164;
+
       return issueSessionForEmail(app, {
         email,
-        firstName: req.body.firstName,
-        lastName: req.body.lastName,
-        phone: req.body.phone,
+        firstName,
+        lastName,
+        phone: phoneForDb,
       });
     },
   );
