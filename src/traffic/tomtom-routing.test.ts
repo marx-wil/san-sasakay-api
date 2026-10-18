@@ -38,7 +38,10 @@ test("segmentsFromTomTomRoute groups traffic sections by severity", () => {
   const segments = segmentsFromTomTomRoute(route);
   assert.ok(segments.length >= 2);
   assert.equal(segments[0]?.level, "light");
-  assert.equal(segments.some((s) => s.level === "heavy"), true);
+  assert.equal(
+    segments.some((s) => s.level === "heavy"),
+    true,
+  );
 });
 
 test("calculateRouteWithTraffic parses mocked TomTom HTTP", async () => {
@@ -63,14 +66,16 @@ test("calculateRouteWithTraffic parses mocked TomTom HTTP", async () => {
     ],
   };
 
-  const fetchFn = async () =>
-    new Response(JSON.stringify(mockBody), { status: 200 });
+  const fetchFn = async () => new Response(JSON.stringify(mockBody), { status: 200 });
 
   const result = await calculateRouteWithTraffic({
     apiKey: "test-key",
     origin: { lat: 14.6, lng: 121.0 },
     dest: { lat: 14.65, lng: 121.05 },
-    supportingPoints: [[121.0, 14.6], [121.05, 14.65]],
+    supportingPoints: [
+      [121.0, 14.6],
+      [121.05, 14.65],
+    ],
     fetchFn,
   });
 
@@ -87,11 +92,17 @@ test("projectSegmentsOntoPolyline maps levels onto target polyline", () => {
   ];
   const projected = projectSegmentsOntoPolyline(target, [
     {
-      coordinates: [[121.0, 14.6], [121.02, 14.61]],
+      coordinates: [
+        [121.0, 14.6],
+        [121.02, 14.61],
+      ],
       level: "moderate",
     },
     {
-      coordinates: [[121.02, 14.61], [121.04, 14.62]],
+      coordinates: [
+        [121.02, 14.61],
+        [121.04, 14.62],
+      ],
       level: "heavy",
     },
   ]);

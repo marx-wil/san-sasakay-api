@@ -7,16 +7,16 @@ import type { ROUTE_STATUS } from "../db/schema.js";
 import { AppError, NotFound } from "../lib/errors.js";
 import { LATLNG_RE, parseLatLng } from "../lib/latlng.js";
 import { LRUCache } from "../lib/lru-cache.js";
+import { isLastReportFresh } from "../lib/report-window.js";
 import {
   polylineLengthM,
   remainingPolylineToDest,
   samplePolylineVertices,
 } from "../lib/route-polyline.js";
-import { isLastReportFresh } from "../lib/report-window.js";
 import {
+  type TrafficLevel,
   calculateRouteWithTraffic,
   projectSegmentsOntoPolyline,
-  type TrafficLevel,
 } from "../traffic/tomtom-routing.js";
 
 const TrafficLevelSchema = z.enum(["light", "moderate", "heavy"]);

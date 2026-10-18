@@ -96,7 +96,7 @@ export function segmentsFromTomTomRoute(route: TomTomRoute): TrafficSegment[] {
     const end = sec.endPointIndex ?? coords.length - 1;
     const level = levelFromCategory(sec.simpleCategory);
     for (let i = start; i <= end && i < levelAt.length; i++) {
-      levelAt[i] = mergeLevel(levelAt[i]!, level);
+      levelAt[i] = mergeLevel(levelAt[i] ?? "light", level);
     }
   }
 
@@ -106,14 +106,14 @@ export function segmentsFromTomTomRoute(route: TomTomRoute): TrafficSegment[] {
     if (levelAt[i] !== levelAt[runStart]) {
       segments.push({
         coordinates: coords.slice(runStart, i + 1),
-        level: levelAt[runStart]!,
+        level: levelAt[runStart] ?? "light",
       });
       runStart = i;
     }
   }
   segments.push({
     coordinates: coords.slice(runStart),
-    level: levelAt[runStart]!,
+    level: levelAt[runStart] ?? "light",
   });
 
   return segments.filter((s) => s.coordinates.length >= 2);
@@ -151,14 +151,12 @@ export function projectSegmentsOntoPolyline(
 
   const cumSource: number[] = [0];
   for (let i = 1; i < sourceCoords.length; i++) {
-    const a = sourceCoords[i - 1]!;
-    const b = sourceCoords[i]!;
-    cumSource.push(
-      cumSource[i - 1]! +
-        haversineSeg(a, b),
-    );
+    const a = sourceCoords.at(i - 1);
+    const b = sourceCoords.at(i);
+    if (a === undefined || b === undefined) continue;
+    cumSource.push((cumSource.at(i - 1) ?? 0) + haversineSeg(a, b));
   }
-  const totalSource = cumSource[cumSource.length - 1]! || 1;
+  const totalSource = cumSource.at(-1) ?? 1;
 
   const levelAtTarget: TrafficLevel[] = [];
   for (const t of targetCoords) {
@@ -167,7 +165,7 @@ export function projectSegmentsOntoPolyline(
       sourceLevels.length - 1,
       Math.max(0, Math.round(frac * (sourceLevels.length - 1))),
     );
-    levelAtTarget.push(sourceLevels[idx]!);
+    levelAtTarget.push(sourceLevels.at(idx) ?? "light");
   }
 
   const out: TrafficSegment[] = [];
@@ -176,14 +174,14 @@ export function projectSegmentsOntoPolyline(
     if (levelAtTarget[i] !== levelAtTarget[runStart]) {
       out.push({
         coordinates: targetCoords.slice(runStart, i + 1),
-        level: levelAtTarget[runStart]!,
+        level: levelAtTarget[runStart] ?? "light",
       });
       runStart = i;
     }
   }
   out.push({
     coordinates: targetCoords.slice(runStart),
-    level: levelAtTarget[runStart]!,
+    level: levelAtTarget[runStart] ?? "light",
   });
   return out.filter((s) => s.coordinates.length >= 2);
 }
@@ -194,9 +192,7 @@ function haversineSeg(a: [number, number], b: [number, number]): number {
   const lat2 = (b[1] * Math.PI) / 180;
   const dLat = ((b[1] - a[1]) * Math.PI) / 180;
   const dLng = ((b[0] - a[0]) * Math.PI) / 180;
-  const x =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(x));
 }
 
@@ -206,11 +202,12 @@ function closestFractionOnPolyline(
   total: number,
   point: [number, number],
 ): number {
-  let bestDist = Infinity;
+  let bestDist = Number.POSITIVE_INFINITY;
   let bestFrac = 0;
   for (let i = 1; i < coords.length; i++) {
-    const a = coords[i - 1]!;
-    const b = coords[i]!;
+    const a = coords.at(i - 1);
+    const b = coords.at(i);
+    if (a === undefined || b === undefined) continue;
     const abx = b[0] - a[0];
     const aby = b[1] - a[1];
     const lenSq = abx * abx + aby * aby;
@@ -226,8 +223,10 @@ function closestFractionOnPolyline(
     const dist = dx * dx + dy * dy;
     if (dist < bestDist) {
       bestDist = dist;
-      const segLen = cum[i]! - cum[i - 1]!;
-      bestFrac = (cum[i - 1]! + segLen * t) / total;
+      const cumEnd = cum.at(i) ?? 0;
+      const cumStart = cum.at(i - 1) ?? 0;
+      const segLen = cumEnd - cumStart;
+      bestFrac = (cumStart + segLen * t) / total;
     }
   }
   return Math.max(0, Math.min(1, bestFrac));

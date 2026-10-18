@@ -12,9 +12,7 @@ export function haversineM(a: LatLng, b: LatLng): number {
   const dLng = ((b.lng - a.lng) * Math.PI) / 180;
   const lat1 = (a.lat * Math.PI) / 180;
   const lat2 = (b.lat * Math.PI) / 180;
-  const x =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(x));
 }
 
@@ -30,21 +28,27 @@ export function closestPointOnPolyline(
 ): ClosestPointOnPolyline | null {
   if (coords.length === 0) return null;
   if (coords.length === 1) {
-    return { point: coords[0]!, index: 0, t: 0 };
+    const point = coords.at(0);
+    if (point === undefined) return null;
+    return { point, index: 0, t: 0 };
   }
+
+  const first = coords.at(0);
+  if (first === undefined) return null;
 
   const ux = user.lng;
   const uy = user.lat;
-  let bestDistSq = Infinity;
+  let bestDistSq = Number.POSITIVE_INFINITY;
   let best: ClosestPointOnPolyline = {
-    point: coords[0]!,
+    point: first,
     index: 0,
     t: 0,
   };
 
   for (let i = 0; i < coords.length - 1; i++) {
-    const a = coords[i]!;
-    const b = coords[i + 1]!;
+    const a = coords.at(i);
+    const b = coords.at(i + 1);
+    if (a === undefined || b === undefined) continue;
     const abx = b[0] - a[0];
     const aby = b[1] - a[1];
     const lenSq = abx * abx + aby * aby;
@@ -69,10 +73,13 @@ export function closestPointOnPolyline(
 
 function dedupeCoords(coords: [number, number][]): [number, number][] {
   if (coords.length === 0) return [];
-  const out: [number, number][] = [coords[0]!];
+  const head = coords.at(0);
+  if (head === undefined) return [];
+  const out: [number, number][] = [head];
   for (let i = 1; i < coords.length; i++) {
-    const prev = out[out.length - 1]!;
-    const cur = coords[i]!;
+    const prev = out.at(-1);
+    const cur = coords.at(i);
+    if (prev === undefined || cur === undefined) continue;
     const dx = cur[0] - prev[0];
     const dy = cur[1] - prev[1];
     if (dx * dx + dy * dy > 1e-18) out.push(cur);
@@ -100,10 +107,7 @@ function destSnapUsable(dest: LatLng, destPt: ClosestPointOnPolyline): boolean {
   return haversineM(dest, { lat, lng }) <= DEST_OFF_ROUTE_M;
 }
 
-export function remainingPolyline(
-  coords: [number, number][],
-  user: LatLng,
-): [number, number][] {
+export function remainingPolyline(coords: [number, number][], user: LatLng): [number, number][] {
   if (coords.length < 2) return coords.slice() as [number, number][];
 
   const closest = closestPointOnPolyline(coords, user);
@@ -116,7 +120,9 @@ export function remainingPolyline(
     remaining.shift();
   }
 
-  return remaining.length >= 2 ? remaining : [closest.point, coords[coords.length - 1]!];
+  if (remaining.length >= 2) return remaining;
+  const last = coords.at(-1);
+  return last === undefined ? remaining : [closest.point, last];
 }
 
 export function remainingPolylineToDest(
@@ -148,8 +154,9 @@ export function remainingPolylineToDest(
 export function polylineLengthM(coords: [number, number][]): number {
   let total = 0;
   for (let i = 1; i < coords.length; i++) {
-    const a = coords[i - 1]!;
-    const b = coords[i]!;
+    const a = coords.at(i - 1);
+    const b = coords.at(i);
+    if (a === undefined || b === undefined) continue;
     total += haversineM({ lat: a[1], lng: a[0] }, { lat: b[1], lng: b[0] });
   }
   return total;
@@ -165,7 +172,8 @@ export function samplePolylineVertices(
   const step = (coords.length - 1) / (maxPoints - 1);
   for (let i = 0; i < maxPoints; i++) {
     const idx = Math.min(coords.length - 1, Math.round(i * step));
-    out.push(coords[idx]!);
+    const vtx = coords.at(idx);
+    if (vtx !== undefined) out.push(vtx);
   }
   return dedupeCoords(out);
 }

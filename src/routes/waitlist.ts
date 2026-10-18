@@ -3,6 +3,7 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { hashIdentifier } from "../auth/magic-link.js";
 import { db } from "../db/client.js";
+import { isDev } from "../config.js";
 import { Conflict } from "../lib/errors.js";
 import { sendWaitlistConfirmation } from "../lib/waitlist-email.js";
 
@@ -46,7 +47,11 @@ export const waitlistRoutes: FastifyPluginAsyncZod = async (app) => {
           // path at 202 so a tripped probe still can't distinguish
           // itself from a real fresh signup).
           200: z.object({ ok: z.literal(true), alreadyJoined: z.literal(true) }),
-          202: z.object({ ok: z.literal(true) }),
+          202: z.object({
+            ok: z.literal(true),
+            // Dev-only signal. Omitted in production responses.
+            sent: z.boolean().optional(),
+          }),
         },
       },
       config: {
@@ -113,8 +118,10 @@ export const waitlistRoutes: FastifyPluginAsyncZod = async (app) => {
       `);
       const position = posResult.rows[0]?.pos;
 
+      let sent = false;
       try {
         await sendWaitlistConfirmation(email, position);
+        sent = true;
       } catch (err) {
         // Don't fail the request if the email send blew up — the user
         // is in the list, which is what matters. Same posture as
@@ -123,6 +130,9 @@ export const waitlistRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       reply.code(202);
+      if (isDev) {
+        return { ok: true as const, sent };
+      }
       return { ok: true as const };
     },
   );

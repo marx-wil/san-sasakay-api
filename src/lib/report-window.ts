@@ -85,8 +85,7 @@ export function isLastReportFresh(
   nowMs = Date.now(),
 ): boolean {
   if (!lastReportAt) return false;
-  const t =
-    typeof lastReportAt === "string" ? Date.parse(lastReportAt) : lastReportAt.getTime();
+  const t = typeof lastReportAt === "string" ? Date.parse(lastReportAt) : lastReportAt.getTime();
   if (Number.isNaN(t)) return false;
   return nowMs - t <= WINDOW_MINUTES * 60_000;
 }

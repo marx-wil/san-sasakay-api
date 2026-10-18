@@ -30,14 +30,14 @@ export async function sendWaitlistConfirmation(email: string, position?: number)
     "Nasa waitlist ka na",
     "",
     "Salamat sa pagsali. Bago lumabas sa publiko ang Android app, " +
-      "ikaw ay isa sa mga unang aabisuhan.",
+      "ikaw ay isa sa mga unang makakagamit ng verified routes, fares, " +
+      "at commute reality checks.",
     "",
     positionLine,
     "",
     "Ano ang susunod?",
     "Wala. Magpahinga ka muna. Pag handa na, padadalhan ka namin ng " +
-      "imbitasyon — at sa unang sign-in mo, may +200 Sasakay Points " +
-      "kang naghihintay. Welcome bonus, regalo sa pagiging maaga.",
+      "imbitasyon para sa maagang access sa Android app.",
     "",
     "—",
     "Para sa bawat Pilipinong umuuwi.",
@@ -47,7 +47,8 @@ export async function sendWaitlistConfirmation(email: string, position?: number)
   // Hidden preheader text — what most inbox previews show beside the
   // subject line. Padded with whitespace so the client doesn't trail
   // it with the visible body text.
-  const preheader = "Salamat. Aabisuhan ka namin bago tayo mag-launch.";
+  const preheader =
+    "Salamat. Maagang access sa verified route planner bago ang public launch.";
 
   const html = `<!doctype html>
 <html lang="tl">
@@ -81,7 +82,8 @@ export async function sendWaitlistConfirmation(email: string, position?: number)
                 </h1>
                 <p style="margin:0 0 20px 0;font-family:${BRAND.sans};font-size:15px;line-height:1.55;color:${BRAND.ink2};">
                   Salamat sa pagsali. Bago lumabas sa publiko ang Android app,
-                  ikaw ay isa sa mga unang aabisuhan.
+                  ikaw ay isa sa mga unang makakagamit ng verified routes,
+                  fares, at commute reality checks.
                 </p>
 
                 <!-- Position chip (only when we have a number) -->
@@ -105,9 +107,7 @@ export async function sendWaitlistConfirmation(email: string, position?: number)
                 </h2>
                 <p style="margin:0 0 16px 0;font-family:${BRAND.sans};font-size:14px;line-height:1.55;color:${BRAND.ink2};">
                   Wala. Magpahinga ka muna. Pag handa na, padadalhan ka namin
-                  ng imbitasyon — at sa unang sign-in mo, may
-                  <strong style="color:${BRAND.ink};font-weight:600;">+200 Sasakay Points</strong>
-                  kang naghihintay. Welcome bonus, regalo sa pagiging maaga.
+                  ng imbitasyon para sa maagang access sa Android app.
                 </p>
               </td>
             </tr>
