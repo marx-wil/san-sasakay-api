@@ -11,7 +11,6 @@ import {
   cognitoGetUserStatus,
   cognitoPasswordLogin,
 } from "./cognito.js";
-import { sendSignupOtp, storePendingSignup, verifyPendingSignup } from "./signup-otp.js";
 import {
   generateMagicToken,
   hashIdentifier,
@@ -20,6 +19,7 @@ import {
   sendMagicLink,
 } from "./magic-link.js";
 import { issueSessionForEmail } from "./session.js";
+import { sendSignupOtp, storePendingSignup, verifyPendingSignup } from "./signup-otp.js";
 import { findOrCreateUserByEmailHash, stampEarlyAdopter, touchLastSeen } from "./users.js";
 
 const RequestBody = z.object({
@@ -130,15 +130,11 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       const tokenHash = hashToken(token);
       const expiresAt = new Date(Date.now() + env.MAGIC_LINK_TTL_SECONDS * 1000);
 
-      try {
-        await db.insert(magicLinkTokens).values({
-          tokenHash,
-          emailHash,
-          expiresAt,
-        });
-      } catch (err) {
-        throw err;
-      }
+      await db.insert(magicLinkTokens).values({
+        tokenHash,
+        emailHash,
+        expiresAt,
+      });
 
       // Email CTA points at the web (sansasakay.com), not the API. The
       // /auth/verify page on the landing peeks POST /auth/status first,
@@ -285,9 +281,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       });
 
       const phoneForDb =
-        req.body.phone && req.body.phone.trim().length > 0
-          ? req.body.phone
-          : pending.phoneE164;
+        req.body.phone && req.body.phone.trim().length > 0 ? req.body.phone : pending.phoneE164;
 
       return issueSessionForEmail(app, {
         email,
