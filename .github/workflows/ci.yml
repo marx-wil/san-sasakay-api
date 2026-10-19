@@ -25,6 +25,40 @@ jobs:
     needs: lint-and-typecheck
     steps:
       - uses: actions/checkout@v4
+
+      # Same OSM pre-fetch as deploy: GeoJSON is gitignored, so the Docker
+      # build context must include data/osm-routes/metro-manila.geojson or
+      # in-container osm:fetch will call Overpass and fail when mirrors are down.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - uses: actions/cache@v4
+        with:
+          path: data/osm-routes/metro-manila.geojson
+          key: osm-routes-v2-stops-${{ hashFiles('scripts/fetch-osm-routes.ts') }}
+          restore-keys: |
+            osm-routes-v2-stops-
+
+      - name: Fetch OSM route data
+        run: |
+          npm ci --include=dev
+          npm run osm:fetch
+
+      - name: Verify OSM route data
+        run: |
+          test -f data/osm-routes/metro-manila.geojson
+          node -e "
+          const fc = JSON.parse(require('fs').readFileSync('data/osm-routes/metro-manila.geojson', 'utf8'));
+          const withStops = fc.features.filter((f) => (f.properties?.stops?.length ?? 0) > 0).length;
+          if (withStops === 0) {
+            console.error('metro-manila.geojson has no properties.stops — run: npm run osm:fetch -- --force');
+            process.exit(1);
+          }
+          console.log('OSM routes with stops:', withStops, '/', fc.features.length);
+          "
+
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
