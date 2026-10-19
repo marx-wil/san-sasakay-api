@@ -166,8 +166,9 @@ export async function verifyPendingSignup(
     throw BadRequest("INVALID_CODE", "Mali ang verification code");
   }
 
-  await db.delete(pendingSignups).where(eq(pendingSignups.emailHash, emailHash));
-
+  // Do not delete the row here — /auth/confirm still needs to create the Cognito
+  // user. If that step fails (e.g. IAM), the commuter must be able to retry the
+  // same OTP without the pending row vanishing.
   return {
     email: "",
     password: decryptPassword(row.passwordCiphertext),
@@ -175,4 +176,8 @@ export async function verifyPendingSignup(
     lastName: row.lastName,
     phoneE164: row.phoneE164 ?? undefined,
   };
+}
+
+export async function deletePendingSignup(emailHash: string): Promise<void> {
+  await db.delete(pendingSignups).where(eq(pendingSignups.emailHash, emailHash));
 }

@@ -19,7 +19,12 @@ import {
   sendMagicLink,
 } from "./magic-link.js";
 import { issueSessionForEmail } from "./session.js";
-import { sendSignupOtp, storePendingSignup, verifyPendingSignup } from "./signup-otp.js";
+import {
+  deletePendingSignup,
+  sendSignupOtp,
+  storePendingSignup,
+  verifyPendingSignup,
+} from "./signup-otp.js";
 import { findOrCreateUserByEmailHash, stampEarlyAdopter, touchLastSeen } from "./users.js";
 
 const RequestBody = z.object({
@@ -272,13 +277,20 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       const firstName = req.body.firstName ?? pending.firstName;
       const lastName = req.body.lastName ?? pending.lastName;
 
-      await cognitoCreateConfirmedUser({
-        email,
-        password: pending.password,
-        firstName,
-        lastName,
-        phoneE164: pending.phoneE164,
-      });
+      try {
+        await cognitoCreateConfirmedUser({
+          email,
+          password: pending.password,
+          firstName,
+          lastName,
+          phoneE164: pending.phoneE164,
+        });
+      } catch (err) {
+        req.log.error({ err, email }, "cognito create failed after OTP verified");
+        throw err;
+      }
+
+      await deletePendingSignup(emailHash);
 
       const phoneForDb =
         req.body.phone && req.body.phone.trim().length > 0 ? req.body.phone : pending.phoneE164;
